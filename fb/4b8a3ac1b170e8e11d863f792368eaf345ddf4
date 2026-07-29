@@ -1,0 +1,115 @@
+docs/superpowers/plans/2026-07-29-自动小说盒子.md
+  s_aca8d3601d736b::t_0e773880e69272 343,345-350,352,355-360,363,367-383 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a69a39f5dc2f7d73760024b","tool_type":"agent","tool_id":"Edit","line_ranges":[{"Single":343},{"Range":[345,350]},{"Single":352},{"Range":[355,360]},{"Single":363},{"Range":[367,383]}]}]}
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "fb4b8a3ac1b170e8e11d863f792368eaf345ddf4",
+  "prompts": {},
+  "sessions": {
+    "s_aca8d3601d736b": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a696dc95dc2f7d7375ffdb3",
+        "model": "openrouter-3o__max"
+      },
+      "human_author": "yanguifang <yanguifang@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {
+    "docs/superpowers/plans/2026-07-29-自动小说盒子.md": [
+      {
+        "hash": "s_aca8d3601d736b::t_0e773880e69272",
+        "line_ranges": [
+          {
+            "Single": 343
+          },
+          {
+            "Range": [
+              345,
+              350
+            ]
+          },
+          {
+            "Single": 352
+          },
+          {
+            "Range": [
+              355,
+              360
+            ]
+          },
+          {
+            "Single": 363
+          },
+          {
+            "Range": [
+              367,
+              383
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a69a39f5dc2f7d73760024b",
+            "tool_type": "agent",
+            "tool_id": "Edit",
+            "line_ranges": [
+              {
+                "Single": 343
+              },
+              {
+                "Range": [
+                  345,
+                  350
+                ]
+              },
+              {
+                "Single": 352
+              },
+              {
+                "Range": [
+                  355,
+                  360
+                ]
+              },
+              {
+                "Single": 363
+              },
+              {
+                "Range": [
+                  367,
+                  383
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {
+    "s_aca8d3601d736b": {
+      "tool": "trae",
+      "conversation_id": "6a696dc95dc2f7d7375ffdb3",
+      "session_id": "6a696dc95dc2f7d7375ffdb3",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_aca8d3601d736b::t_0ac206b0829600": {
+      "tool": "trae",
+      "conversation_id": "6a696dc95dc2f7d7375ffdb3",
+      "session_id": "6a696dc95dc2f7d7375ffdb3",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_aca8d3601d736b::t_0e773880e69272": {
+      "tool": "trae",
+      "conversation_id": "6a696dc95dc2f7d7375ffdb3",
+      "session_id": "6a696dc95dc2f7d7375ffdb3",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
