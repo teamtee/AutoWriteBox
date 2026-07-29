@@ -1,0 +1,73 @@
+docs/superpowers/plans/2026-07-29-自动小说盒子.md
+  s_aca8d3601d736b::t_d6e315ab2e0071 1838-1839 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a69ae635dc2f7d7376005c8","tool_type":"agent","tool_id":"Edit","line_ranges":[{"Range":[1838,1839]}]}]}
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "5686800e4eddc9bbc353ed6189abb5f979aca755",
+  "prompts": {},
+  "sessions": {
+    "s_aca8d3601d736b": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a696dc95dc2f7d7375ffdb3",
+        "model": "openrouter-3o__max"
+      },
+      "human_author": "yanguifang <yanguifang@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {
+    "docs/superpowers/plans/2026-07-29-自动小说盒子.md": [
+      {
+        "hash": "s_aca8d3601d736b::t_d6e315ab2e0071",
+        "line_ranges": [
+          {
+            "Range": [
+              1838,
+              1839
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a69ae635dc2f7d7376005c8",
+            "tool_type": "agent",
+            "tool_id": "Edit",
+            "line_ranges": [
+              {
+                "Range": [
+                  1838,
+                  1839
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {
+    "s_aca8d3601d736b": {
+      "tool": "trae",
+      "conversation_id": "6a696dc95dc2f7d7375ffdb3",
+      "session_id": "6a696dc95dc2f7d7375ffdb3",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_aca8d3601d736b::t_46ece4deda1d37": {
+      "tool": "trae",
+      "conversation_id": "6a696dc95dc2f7d7375ffdb3",
+      "session_id": "6a696dc95dc2f7d7375ffdb3",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_aca8d3601d736b::t_d6e315ab2e0071": {
+      "tool": "trae",
+      "conversation_id": "6a696dc95dc2f7d7375ffdb3",
+      "session_id": "6a696dc95dc2f7d7375ffdb3",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
