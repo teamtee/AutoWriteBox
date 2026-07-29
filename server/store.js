@@ -135,3 +135,23 @@ export function rollback(obj, field) {
   obj[field].content = obj[field].history.pop();
   return true;
 }
+
+// ——— 全局配置 ———
+const configPath = () => join(DATA_ROOT, 'config.json');
+const DEFAULT_CONFIG = { baseUrl: '', model: '', apiKey: '', chapterWordTarget: 2000 };
+
+export async function readConfig() {
+  try {
+    return { ...DEFAULT_CONFIG, ...JSON.parse(await readFile(configPath(), 'utf8')) };
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+}
+export async function writeConfig(patch) {
+  const cur = await readConfig();
+  const next = { ...cur, ...patch };
+  if (!patch.apiKey || patch.apiKey === 'sk-****') next.apiKey = cur.apiKey;  // 保留原 Key
+  await mkdir(DATA_ROOT, { recursive: true });
+  await atomicWriteJson(configPath(), next);
+  return next;
+}
