@@ -62,3 +62,76 @@ export async function listBooks() {
   }
   return out;
 }
+
+// ——— 序号格式化 ———
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// ——— section ———
+export async function addSection(bookId, { title }) {
+  const book = await readBook(bookId);
+  const index = book.sections.length + 1;
+  const id = `section-${pad2(index)}`;
+  const section = {
+    id, index, title: title || `第 ${index} 部`,
+    outline: { content: '', history: [] },
+    characters: [], summary: '', progress: '', chapters: [],
+  };
+  await mkdir(join(bookDir(bookId), id), { recursive: true });
+  await atomicWriteJson(join(bookDir(bookId), id, 'section.json'), section);
+  book.sections.push(id);
+  await writeBook(bookId, book);
+  return section;
+}
+export async function readSection(bookId, sectionId) {
+  return JSON.parse(await readFile(join(bookDir(bookId), sectionId, 'section.json'), 'utf8'));
+}
+export async function writeSection(bookId, sectionId, obj) {
+  await atomicWriteJson(join(bookDir(bookId), sectionId, 'section.json'), obj);
+}
+
+// ——— chapter ———
+export async function addChapter(bookId, sectionId, { title }) {
+  const section = await readSection(bookId, sectionId);
+  const index = section.chapters.length + 1;
+  const id = `chapter-${pad2(index)}`;
+  const chapter = {
+    id, index, title: title || `第 ${index} 章`,
+    content: '', characters: [], summary: '', progress: '',
+    status: 'done', history: [],
+  };
+  await atomicWriteJson(join(bookDir(bookId), sectionId, `${id}.json`), chapter);
+  section.chapters.push(id);
+  await writeSection(bookId, sectionId, section);
+  return chapter;
+}
+export async function readChapter(bookId, sectionId, chapterId) {
+  return JSON.parse(await readFile(join(bookDir(bookId), sectionId, `${chapterId}.json`), 'utf8'));
+}
+export async function writeChapter(bookId, sectionId, chapterId, obj) {
+  await atomicWriteJson(join(bookDir(bookId), sectionId, `${chapterId}.json`), obj);
+}
+
+// ——— history 回退栈（限深 20）———
+const HISTORY_MAX = 20;
+export function pushHistory(obj, field) {
+  if (field === 'content') {
+    obj.history = obj.history || [];
+    obj.history.push(obj.content);
+    if (obj.history.length > HISTORY_MAX) obj.history.shift();
+  } else {
+    obj[field].history = obj[field].history || [];
+    obj[field].history.push(obj[field].content);
+    if (obj[field].history.length > HISTORY_MAX) obj[field].history.shift();
+  }
+  return obj;
+}
+export function rollback(obj, field) {
+  if (field === 'content') {
+    if (!obj.history || obj.history.length === 0) return false;
+    obj.content = obj.history.pop();
+    return true;
+  }
+  if (!obj[field].history || obj[field].history.length === 0) return false;
+  obj[field].content = obj[field].history.pop();
+  return true;
+}
