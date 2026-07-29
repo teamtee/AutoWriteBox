@@ -1,0 +1,14 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "e32657cd7f880ade808e9a3659e909a405d15c59",
+  "prompts": {},
+  "humans": {
+    "h_2ea779daa8153d": {
+      "author": "yanguifang <yanguifang@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
