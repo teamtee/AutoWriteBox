@@ -20,7 +20,7 @@ export const rollbackChapter = (bookId: string, sid: string, cid: string) =>
 export const saveOutline = (bookId: string, content: string) => jput(`/api/books/${bookId}/outline`, { content });
 export const saveCore = (bookId: string, core: unknown) => jput(`/api/books/${bookId}/core`, { core });
 
-export interface SSEEvent { delta?: string; done?: boolean; error?: string; chapterId?: string; }
+export interface SSEEvent { delta?: string; done?: boolean; error?: string; chapterId?: string; sections?: string; }
 
 export function parseSSELines(chunk: string, buffer: string): { events: SSEEvent[]; rest: string } {
   const events: SSEEvent[] = [];

@@ -9,3 +9,7 @@
 .btn-row { display: flex; gap: 8px; }
 .whip-row { display: flex; gap: 8px; margin-top: 8px; }
 .whip-row textarea { flex: 1; height: 48px; }
+.core-form { display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
+.core-form label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
+.core-form textarea { width: 100%; font: inherit; padding: 6px; }
+.core-form button { align-self: flex-start; padding: 6px 16px; }

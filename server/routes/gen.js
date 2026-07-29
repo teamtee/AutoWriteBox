@@ -1,7 +1,7 @@
 import * as store from '../store.js';
 import {
   buildSystemPrompt, buildContext, buildChapterInstruction,
-  buildOutlineInstruction, DIGEST_INSTRUCTION,
+  buildOutlineInstruction, buildSectionsInstruction, DIGEST_INSTRUCTION,
 } from '../prompts.js';
 import { extractDigest as defaultExtract } from '../llm.js';
 
@@ -41,10 +41,28 @@ export function mountGenRoutes(app, deps = {}) {
     res.end();
   });
 
-  app.post('/api/gen/chapter', async (req, res) => {
+  // 让 LLM 规划分部结构，SSE 流式返回文本；不自动建部，由用户参考后手动新建
+  app.post('/api/gen/sections', async (req, res) => {
     sseInit(res);
     try {
-      const { bookId, sectionId, mode, whip } = req.body;
+      const config = await store.readConfig();
+      const book = await store.readBook(req.body.bookId);
+      const system = buildSystemPrompt(book.settings.core);
+      const full = await streamInto(res, {
+        config, system,
+        instruction: buildSectionsInstruction(book.outline.content),
+      });
+      send(res, { done: true, sections: full });
+    } catch (e) { send(res, { error: String(e.message || e) }); }
+    res.end();
+  });
+
+  app.post('/api/gen/chapter', async (req, res) => {
+    sseInit(res);
+    const { bookId, sectionId, mode, whip } = req.body;
+    let createdChapterId = null;  // mode==='next' 时新建的空章，失败要回滚
+    let full = '';
+    try {
       const config = await store.readConfig();
       const book = await store.readBook(bookId);
       const section = await store.readSection(bookId, sectionId);
@@ -55,6 +73,7 @@ export function mountGenRoutes(app, deps = {}) {
       if (mode === 'next') {
         chapter = await store.addChapter(bookId, sectionId, {});
         chapterId = chapter.id;
+        createdChapterId = chapterId;
       } else {
         chapter = await store.readChapter(bookId, sectionId, chapterId);
         store.pushHistory(chapter, 'content');
@@ -71,7 +90,7 @@ export function mountGenRoutes(app, deps = {}) {
       const instruction = context + '\n\n' +
         buildChapterInstruction({ chapterIndex: chapter.index, wordTarget: config.chapterWordTarget, mode, whip });
 
-      const full = await streamInto(res, { config, system, instruction });
+      full = await streamInto(res, { config, system, instruction });
       chapter.content = full;
       await store.writeChapter(bookId, sectionId, chapterId, chapter);
 
@@ -98,7 +117,17 @@ export function mountGenRoutes(app, deps = {}) {
       } catch { /* digest 失败，正文已保存，跳过 */ }
 
       send(res, { done: true, chapterId });
-    } catch (e) { send(res, { error: String(e.message || e) }); }
+    } catch (e) {
+      // 空章回滚：mode==='next' 新建了章，但正文从未成功写入，则从 section.chapters 中移除
+      if (mode === 'next' && createdChapterId && !full) {
+        try {
+          const sec = await store.readSection(bookId, sectionId);
+          sec.chapters = sec.chapters.filter((cid) => cid !== createdChapterId);
+          await store.writeSection(bookId, sectionId, sec);
+        } catch { /* 回滚失败不再二次抛错 */ }
+      }
+      send(res, { error: String(e.message || e) });
+    }
     res.end();
   });
 }

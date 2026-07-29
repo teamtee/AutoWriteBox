@@ -62,13 +62,26 @@ export default function App() {
     });
   };
 
+  const runSections = () => {
+    setStreaming(true); setStreamingText('');
+    abortRef.current = api.streamGen('/api/gen/sections', { bookId }, {
+      onDelta: (d) => setStreamingText((t) => t + d),
+      onError: (m) => { alert('生成失败：' + m); setStreaming(false); },
+      onDone: (e) => {
+        setStreaming(false);
+        alert('分部建议：\n' + (e.sections || ''));
+      },
+    });
+  };
+
   return (
     <div className="layout">
       <Sidebar tree={tree} selection={selection}
         onSelect={setSelection}
         onAddSection={async () => { await api.addSection(bookId); await reload(bookId); }}
         onAddChapter={async (sid) => { const c = await api.addChapter(bookId, sid); await reload(bookId, { kind: 'chapter', sectionId: sid, chapterId: c.id }); }}
-        onOpenSettings={() => setShowSettings(true)} />
+        onOpenSettings={() => setShowSettings(true)}
+        onPlanSections={runSections} />
       <div className="content">
         <MainPanel tree={tree} selection={selection} streaming={streaming} streamingText={streamingText}
           onSaveChapter={async (content) => {
@@ -76,9 +89,14 @@ export default function App() {
           }}
           onRollback={async () => {
             if (selection.kind === 'chapter') { await api.rollbackChapter(bookId, selection.sectionId, selection.chapterId); await reload(bookId); }
-          }} />
+          }}
+          onSaveCore={async (core) => { await api.saveCore(bookId, core); await reload(bookId); }} />
         <Actions streaming={streaming}
-          onRewrite={() => (selection.kind === 'outline' ? runOutline() : runChapter('rewrite'))}
+          onRewrite={() => {
+            if (selection.kind === 'outline') runOutline();
+            else if (selection.kind === 'chapter') runChapter('rewrite');
+            // core：忽略（core 用它自己的保存表单）
+          }}
           onNext={() => runChapter('next')}
           onWhip={(t) => runChapter('whip', t)}
           onStop={() => { abortRef.current?.(); setStreaming(false); }} />

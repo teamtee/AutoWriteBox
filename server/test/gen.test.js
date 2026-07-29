@@ -110,3 +110,42 @@ test('gen/chapter digest 解析失败时不覆盖已有 progress/summary（断�
     assert.equal(sec.summary, '原摘要');
   }, badDigestDeps);
 });
+
+test('gen/sections 流式返回分部建议，不自动建部', async () => {
+  const secDeps = {
+    async *streamChat() { yield '第 1 部'; yield ' · 起源：xxx'; },
+    async nonStreamChat() { return ''; },
+  };
+  await withServer(async () => {
+    const book = await j(await post('/api/books', { premise: '写侦探故事' }));
+    // 先给 book.outline 塞点内容
+    const bk = await store.readBook(book.id);
+    bk.outline.content = '全书总大纲：...';
+    await store.writeBook(book.id, bk);
+
+    const res = await post('/api/gen/sections', { bookId: book.id });
+    const sse = await readSSE(res);
+    assert.match(sse, /第 1 部/);
+    assert.match(sse, /"done":true/);
+    assert.match(sse, /"sections":/);
+    // 不自动建部
+    const bk2 = await store.readBook(book.id);
+    assert.deepEqual(bk2.sections, []);
+  }, secDeps);
+});
+
+test('gen/chapter next 中途抛错时回滚空章，不残留', async () => {
+  const failDeps = {
+    async *streamChat() { throw new Error('BOOM'); },
+    async nonStreamChat() { return ''; },
+  };
+  await withServer(async () => {
+    const book = await j(await post('/api/books', { premise: 'p' }));
+    const s = await j(await post(`/api/books/${book.id}/sections`, {}));
+    const res = await post('/api/gen/chapter', { bookId: book.id, sectionId: s.id, mode: 'next' });
+    const sse = await readSSE(res);
+    assert.match(sse, /"error"/);
+    const sec = await store.readSection(book.id, s.id);
+    assert.equal(sec.chapters.length, 0);  // 已回滚，不残留
+  }, failDeps);
+});

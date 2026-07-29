@@ -1,12 +1,13 @@
 import type { BookTree } from '../types';
 import type { Selection } from '../store';
 
-export function Sidebar({ tree, selection, onSelect, onAddSection, onAddChapter, onOpenSettings }: {
+export function Sidebar({ tree, selection, onSelect, onAddSection, onAddChapter, onOpenSettings, onPlanSections }: {
   tree: BookTree; selection: Selection;
   onSelect: (s: Selection) => void;
   onAddSection: () => void;
   onAddChapter: (sectionId: string) => void;
   onOpenSettings: () => void;
+  onPlanSections: () => void;
 }) {
   const active = (s: Selection) => JSON.stringify(s) === JSON.stringify(selection) ? 'active' : '';
   return (
@@ -27,7 +28,10 @@ export function Sidebar({ tree, selection, onSelect, onAddSection, onAddChapter,
           <button className="mini" onClick={() => onAddChapter(s.id)}>＋ 加章</button>
         </div>
       ))}
-      <button className="mini" onClick={onAddSection}>＋ 新建部</button>
+      <div className="btn-row">
+        <button className="mini" onClick={onAddSection}>＋ 新建部</button>
+        <button className="mini" onClick={onPlanSections}>🧩 让 AI 规划分部</button>
+      </div>
       <div className="nav-item settings" onClick={onOpenSettings}>⚙️ API 设置</div>
     </aside>
   );

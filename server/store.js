@@ -4,7 +4,12 @@ import { join } from 'node:path';
 let DATA_ROOT = join(process.cwd(), 'data');
 export function setDataRoot(p) { DATA_ROOT = p; }
 const booksDir = () => join(DATA_ROOT, 'books');
-const bookDir = (id) => join(booksDir(), id);
+// 白名单校验：防止 '../' 之类路径遍历。合法 id 只允许字母/数字/下划线/连字符
+export function safeId(id) {
+  if (typeof id !== 'string' || !/^[\w-]+$/.test(id)) throw new Error('BAD_ID');
+  return id;
+}
+const bookDir = (id) => join(booksDir(), safeId(id));
 
 export async function atomicWriteJson(absPath, obj) {
   const tmp = absPath + '.tmp';
@@ -57,6 +62,7 @@ export async function listBooks() {
       out.push({ id: b.id, title: b.title, updatedAt: b.updatedAt });
     } catch (err) {
       if (err.code === 'ENOENT') continue;  // 非书目录（无 book.json）跳过
+      if (err.message === 'BAD_ID') continue;  // 非法目录名（如 .DS_Store）跳过
       throw err;  // 其余错误上抛
     }
   }
@@ -83,10 +89,10 @@ export async function addSection(bookId, { title }) {
   return section;
 }
 export async function readSection(bookId, sectionId) {
-  return JSON.parse(await readFile(join(bookDir(bookId), sectionId, 'section.json'), 'utf8'));
+  return JSON.parse(await readFile(join(bookDir(bookId), safeId(sectionId), 'section.json'), 'utf8'));
 }
 export async function writeSection(bookId, sectionId, obj) {
-  await atomicWriteJson(join(bookDir(bookId), sectionId, 'section.json'), obj);
+  await atomicWriteJson(join(bookDir(bookId), safeId(sectionId), 'section.json'), obj);
 }
 
 // ——— chapter ———
@@ -105,10 +111,10 @@ export async function addChapter(bookId, sectionId, { title }) {
   return chapter;
 }
 export async function readChapter(bookId, sectionId, chapterId) {
-  return JSON.parse(await readFile(join(bookDir(bookId), sectionId, `${chapterId}.json`), 'utf8'));
+  return JSON.parse(await readFile(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), 'utf8'));
 }
 export async function writeChapter(bookId, sectionId, chapterId, obj) {
-  await atomicWriteJson(join(bookDir(bookId), sectionId, `${chapterId}.json`), obj);
+  await atomicWriteJson(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), obj);
 }
 
 // ——— history 回退栈（限深 20）———

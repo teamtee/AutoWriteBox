@@ -38,3 +38,19 @@ test('listBooks 返回摘要', async () => {
 test('readBook 不存在时抛错', async () => {
   await assert.rejects(() => store.readBook('book_nope'), /BOOK_NOT_FOUND/);
 });
+
+test('safeId 拦截路径遍历与非法 id', () => {
+  assert.equal(store.safeId('book_20260729_abcd'), 'book_20260729_abcd');
+  assert.equal(store.safeId('section-01'), 'section-01');
+  assert.equal(store.safeId('chapter-12'), 'chapter-12');
+  assert.throws(() => store.safeId('../evil'), /BAD_ID/);
+  assert.throws(() => store.safeId('a/b'), /BAD_ID/);
+  assert.throws(() => store.safeId(''), /BAD_ID/);
+  assert.throws(() => store.safeId(null), /BAD_ID/);
+});
+
+test('readSection 遇到非法 sectionId 抛 BAD_ID', async () => {
+  const book = await store.createBook({ premise: 'p', title: 't' });
+  await assert.rejects(() => store.readSection(book.id, '../evil'), /BAD_ID/);
+  await assert.rejects(() => store.readChapter(book.id, 'section-01', '../evil'), /BAD_ID/);
+});
