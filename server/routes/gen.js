@@ -82,17 +82,18 @@ export function mountGenRoutes(app, deps = {}) {
           messages: [{ role: 'user', content: `以下是正文：\n${full}\n\n${DIGEST_INSTRUCTION}` }],
         });
         const d = extractDigest(digestText);
-        chapter.summary = d.summary;
-        chapter.progress = d.progress;
+        // 仅当 digest 解析出有效值时才更新，避免空值覆盖已有 summary/progress（断片保护）
+        if (d.summary) chapter.summary = d.summary;
+        if (d.progress) chapter.progress = d.progress;
         if (d.newCharacters.length) chapter.characters.push(...d.newCharacters);
         await store.writeChapter(bookId, sectionId, chapterId, chapter);
         // 冒泡
         const sec = await store.readSection(bookId, sectionId);
         if (d.summary) sec.summary = (sec.summary ? sec.summary + '\n' : '') + `第${chapter.index}章：${d.summary}`;
-        sec.progress = d.progress;
+        if (d.progress) sec.progress = d.progress;
         await store.writeSection(bookId, sectionId, sec);
         const bk = await store.readBook(bookId);
-        bk.progress = d.progress;
+        if (d.progress) bk.progress = d.progress;
         await store.writeBook(bookId, bk);
       } catch { /* digest 失败，正文已保存，跳过 */ }
 

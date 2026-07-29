@@ -18,15 +18,15 @@ const fakeDeps = {
 
 let base;
 beforeEach(() => { store.setDataRoot(mkdtempSync(join(tmpdir(), 'novelbox-'))); });
-function appWithGen() {
+function appWithGen(deps = fakeDeps) {
   const app = express();
   app.use(express.json());
   mountBookRoutes(app);
-  mountGenRoutes(app, fakeDeps);
+  mountGenRoutes(app, deps);
   return app;
 }
-async function withServer(fn) {
-  const server = appWithGen().listen(0);
+async function withServer(fn, deps) {
+  const server = appWithGen(deps).listen(0);
   base = `http://127.0.0.1:${server.address().port}`;
   try { await fn(); } finally { server.close(); }
 }
@@ -74,4 +74,39 @@ test('gen/outline 生成后写入 book.outline', async () => {
     const bk = await store.readBook(book.id);
     assert.equal(bk.outline.content, '这是正文');
   });
+});
+
+test('gen/chapter digest 解析失败时不覆盖已有 progress/summary（断片保护）', async () => {
+  // 变体：正文正常，digest 返回不可解析的 JSON 文本
+  const badDigestDeps = {
+    async *streamChat() { yield '这是'; yield '正文'; },
+    async nonStreamChat() { return '抱歉我不会'; },
+  };
+  await withServer(async () => {
+    const book = await j(await post('/api/books', { premise: 'p' }));
+    const s = await j(await post(`/api/books/${book.id}/sections`, {}));
+    // 预置已有进度路标
+    const bk0 = await store.readBook(book.id);
+    bk0.progress = '原路标';
+    await store.writeBook(book.id, bk0);
+    const sec0 = await store.readSection(book.id, s.id);
+    sec0.progress = '原路标';
+    sec0.summary = '原摘要';
+    await store.writeSection(book.id, s.id, sec0);
+
+    const res = await post('/api/gen/chapter', { bookId: book.id, sectionId: s.id, mode: 'next' });
+    const sse = await readSSE(res);
+    assert.match(sse, /"done":true/);
+
+    const sec = await store.readSection(book.id, s.id);
+    assert.equal(sec.chapters.length, 1);
+    const ch = await store.readChapter(book.id, s.id, sec.chapters[0]);
+    // 正文已落盘
+    assert.equal(ch.content, '这是正文');
+    // 已有 progress/summary 未被空值覆盖
+    const bk = await store.readBook(book.id);
+    assert.equal(bk.progress, '原路标');
+    assert.equal(sec.progress, '原路标');
+    assert.equal(sec.summary, '原摘要');
+  }, badDigestDeps);
 });
