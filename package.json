@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test server/test/*.test.js"
+    "test": "node --test server/test/*.test.js",
+    "build": "cd web && npm install && npm run build"
   },
   "dependencies": {
     "express": "^4.22.2"
