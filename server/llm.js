@@ -41,6 +41,12 @@ export async function* streamChat({ config, system, messages }) {
   }
 }
 
+export async function nonStreamChat({ config, system, messages }) {
+  let out = '';
+  for await (const d of streamChat({ config, system, messages })) out += d;
+  return out;
+}
+
 export function extractDigest(text) {
   const fallback = { summary: '', progress: '', newCharacters: [] };
   const tryParse = (s) => { try { return JSON.parse(s); } catch { return null; } };

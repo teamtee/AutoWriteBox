@@ -2,6 +2,8 @@ import express from 'express';
 import { pathToFileURL } from 'node:url';
 import { mountConfigRoutes } from './routes/config.js';
 import { mountBookRoutes } from './routes/books.js';
+import { mountGenRoutes } from './routes/gen.js';
+import { streamChat, nonStreamChat, extractDigest } from './llm.js';
 
 export function createApp() {
   const app = express();
@@ -9,6 +11,7 @@ export function createApp() {
   app.get('/api/health', (req, res) => res.json({ ok: true }));
   mountConfigRoutes(app);
   mountBookRoutes(app);
+  mountGenRoutes(app, { streamChat, nonStreamChat, extractDigest });
   return app;
 }
 
