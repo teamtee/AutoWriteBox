@@ -1,0 +1,37 @@
+web/src/components/FirstRun.tsx
+  s_aca8d3601d736b::t_1ecf4f8ade2c4d 1-17
+web/src/main.tsx
+  s_aca8d3601d736b::t_1084f29de59c3f 1
+web/src/components/MainPanel.tsx
+  s_aca8d3601d736b::t_6e224da3d0b157 1-32
+web/src/components/Actions.tsx
+  s_aca8d3601d736b::t_25d58368656c89 1-30
+web/src/store.ts
+  s_aca8d3601d736b::t_53625b02a36626 1-19
+web/src/components/SettingsPage.tsx
+  s_aca8d3601d736b::t_bfecee3afdb13f 1-23
+web/src/components/Sidebar.tsx
+  s_aca8d3601d736b::t_2e9cb4c8bec032 1-34
+web/src/App.tsx
+  s_aca8d3601d736b::t_37f020a7d2f4f5 1-11,13-87
+web/src/styles.css
+  s_aca8d3601d736b::t_02896a206a8ad0 1-11
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "7195b029b693dbb5272aa072325128856c34fccb",
+  "prompts": {},
+  "sessions": {
+    "s_aca8d3601d736b": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a696dc95dc2f7d7375ffdb3",
+        "model": "openrouter-3o__max"
+      },
+      "human_author": null
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
