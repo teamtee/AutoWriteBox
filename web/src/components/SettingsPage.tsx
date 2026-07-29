@@ -1,0 +1,23 @@
+import { useEffect, useState } from 'react';
+import type { Config } from '../types';
+import { getConfig, saveConfig } from '../api';
+
+export function SettingsPage({ onClose }: { onClose: () => void }) {
+  const [cfg, setCfg] = useState<Config>({ baseUrl: '', model: '', apiKey: '', chapterWordTarget: 2000 });
+  useEffect(() => { getConfig().then(setCfg); }, []);
+  const set = (k: keyof Config) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setCfg({ ...cfg, [k]: k === 'chapterWordTarget' ? Number(e.target.value) : e.target.value });
+  return (
+    <div className="settings-page">
+      <h2>API 设置</h2>
+      <label>Base URL<input value={cfg.baseUrl} onChange={set('baseUrl')} placeholder="https://api.deepseek.com/v1" /></label>
+      <label>模型<input value={cfg.model} onChange={set('model')} placeholder="deepseek-chat" /></label>
+      <label>API Key<input value={cfg.apiKey} onChange={set('apiKey')} placeholder="sk-..." /></label>
+      <label>每章目标字数<input type="number" value={cfg.chapterWordTarget} onChange={set('chapterWordTarget')} /></label>
+      <div className="btn-row">
+        <button onClick={async () => { const s = await saveConfig(cfg); setCfg(s); onClose(); }}>保存</button>
+        <button onClick={onClose}>返回</button>
+      </div>
+    </div>
+  );
+}
