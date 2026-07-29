@@ -1,0 +1,115 @@
+docs/superpowers/plans/2026-07-29-自动小说盒子.md
+  s_aca8d3601d736b::t_a10fefc07377b2 121,130-131 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a699dec5dc2f7d7376000d1","tool_type":"agent","tool_id":"Edit","line_ranges":[{"Single":121},{"Range":[130,131]}]}]}
+  s_aca8d3601d736b::t_2d6d3bcbbf1f1e 1875,1888 gitai:{"mixed_line_ranges":[],"operations":[{"operation_id":"6a699e125dc2f7d7376000da","tool_type":"agent","tool_id":"Edit","line_ranges":[{"Single":1875},{"Single":1888}]}]}
+  s_aca8d3601d736b::t_bf4797921cc90c 1889
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "28ffddd86b771244360ea2a1f6193ea370982acb",
+  "prompts": {},
+  "sessions": {
+    "s_aca8d3601d736b": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a696dc95dc2f7d7375ffdb3",
+        "model": "openrouter-3o__max"
+      },
+      "human_author": "yanguifang <yanguifang@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {
+    "docs/superpowers/plans/2026-07-29-自动小说盒子.md": [
+      {
+        "hash": "s_aca8d3601d736b::t_a10fefc07377b2",
+        "line_ranges": [
+          {
+            "Single": 121
+          },
+          {
+            "Range": [
+              130,
+              131
+            ]
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a699dec5dc2f7d7376000d1",
+            "tool_type": "agent",
+            "tool_id": "Edit",
+            "line_ranges": [
+              {
+                "Single": 121
+              },
+              {
+                "Range": [
+                  130,
+                  131
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "hash": "s_aca8d3601d736b::t_2d6d3bcbbf1f1e",
+        "line_ranges": [
+          {
+            "Single": 1875
+          },
+          {
+            "Single": 1888
+          }
+        ],
+        "mixed_line_ranges": [],
+        "operations": [
+          {
+            "operation_id": "6a699e125dc2f7d7376000da",
+            "tool_type": "agent",
+            "tool_id": "Edit",
+            "line_ranges": [
+              {
+                "Single": 1875
+              },
+              {
+                "Single": 1888
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "remote_transcripts": {
+    "s_aca8d3601d736b": {
+      "tool": "trae",
+      "conversation_id": "6a696dc95dc2f7d7375ffdb3",
+      "session_id": "6a696dc95dc2f7d7375ffdb3",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_aca8d3601d736b::t_2d6d3bcbbf1f1e": {
+      "tool": "trae",
+      "conversation_id": "6a696dc95dc2f7d7375ffdb3",
+      "session_id": "6a696dc95dc2f7d7375ffdb3",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_aca8d3601d736b::t_a10fefc07377b2": {
+      "tool": "trae",
+      "conversation_id": "6a696dc95dc2f7d7375ffdb3",
+      "session_id": "6a696dc95dc2f7d7375ffdb3",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    },
+    "s_aca8d3601d736b::t_becd80ab2d3c5c": {
+      "tool": "trae",
+      "conversation_id": "6a696dc95dc2f7d7375ffdb3",
+      "session_id": "6a696dc95dc2f7d7375ffdb3",
+      "status": "remote_only",
+      "message": "Remote transcript resolution is not implemented yet for TRAE prompts."
+    }
+  }
+}
