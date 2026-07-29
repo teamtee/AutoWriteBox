@@ -1,0 +1,12 @@
+{
+  "name": "auto-novel-box",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test server/test/"
+  },
+  "dependencies": {
+    "express": "^4.22.2"
+  }
+}
