@@ -1,12 +1,14 @@
 import express from 'express';
 import { pathToFileURL } from 'node:url';
 import { mountConfigRoutes } from './routes/config.js';
+import { mountBookRoutes } from './routes/books.js';
 
 export function createApp() {
   const app = express();
   app.use(express.json({ limit: '5mb' }));
   app.get('/api/health', (req, res) => res.json({ ok: true }));
   mountConfigRoutes(app);
+  mountBookRoutes(app);
   return app;
 }
 
