@@ -39,7 +39,9 @@ export default function App() {
   useEffect(() => { loadShelf().finally(() => setLoading(false)); }, []);
 
   const openBook = async (id: string) => {
-    const t = await api.getTree(id); setTree(t); setSelection(firstSelectable(t)); setView('book');
+    try {
+      const t = await api.getTree(id); setTree(t); setSelection(firstSelectable(t)); setView('book');
+    } catch (e) { toast.error('打开失败：' + (e as Error).message); }
   };
   const reload = async (bookId: string, sel?: Selection) => {
     const t = await api.getTree(bookId); setTree(t); if (sel) setSelection(sel);
@@ -58,8 +60,14 @@ export default function App() {
     return <Bookshelf books={books}
       onOpen={openBook}
       onNew={() => setCreating(true)}
-      onRename={async (id, title) => { await api.renameBook(id, title); await loadShelf(); toast.success('✓ 已改名'); }}
-      onDelete={async (id) => { await api.deleteBook(id); await loadShelf(); toast.success('✓ 已删除'); }} />;
+      onRename={async (id, title) => {
+        try { await api.renameBook(id, title); await loadShelf(); toast.success('✓ 已改名'); }
+        catch (e) { toast.error('改名失败：' + (e as Error).message); }
+      }}
+      onDelete={async (id) => {
+        try { await api.deleteBook(id); await loadShelf(); toast.success('✓ 已删除'); }
+        catch (e) { toast.error('删除失败：' + (e as Error).message); }
+      }} />;
   }
 
   if (!tree) return <div className="boot-skeleton"><div className="sk-line" /></div>;

@@ -6,5 +6,8 @@ command -v node >/dev/null 2>&1 || { echo "请先安装 Node.js（https://nodejs
 # 若存在企业根证书，让 Node 信任它（解决企业网络 TLS 拦截导致的 fetch failed）
 [ -f certs/corp-ca.pem ] && export NODE_EXTRA_CA_CERTS="$(pwd)/certs/corp-ca.pem"
 export PORT=4399
+# 释放端口：杀掉占用 4399 的旧进程，避免旧版服务残留导致改动不生效 / 数据结构不一致
+OLD_PID="$(lsof -ti tcp:$PORT 2>/dev/null)"
+[ -n "$OLD_PID" ] && { echo "发现旧进程占用端口 $PORT，正在关闭…"; kill -9 $OLD_PID 2>/dev/null; sleep 1; }
 ( sleep 2 && open "http://localhost:$PORT" ) &
 node server/index.js

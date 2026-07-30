@@ -1,6 +1,14 @@
 import type { Book, BookTree, BookSummary, Config } from './types';
 
-const json = (r: Response) => r.json();
+// 统一解析：非 2xx 抛错（含后端 {error} 文案），避免把 404 HTML 灌进 JSON.parse 后静默失败
+const json = async (r: Response) => {
+  if (!r.ok) {
+    let msg = `HTTP ${r.status}`;
+    try { const e = await r.json(); if (e?.error) msg = e.error; } catch { /* 非 JSON 响应 */ }
+    throw new Error(msg);
+  }
+  return r.json();
+};
 const jpost = (p: string, b: unknown) =>
   fetch(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json);
 
