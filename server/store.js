@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rename, readdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 let DATA_ROOT = join(process.cwd(), 'data');
@@ -17,9 +17,12 @@ export async function atomicWriteJson(absPath, obj) {
   await rename(tmp, absPath);
 }
 
-function emptyOutline() { return { content: '', history: [] }; }
+function emptyOutline() { return emptyVersioned(); }
 function emptyCore() {
-  return { core: { world: '', style: '', constraints: '', pacing: '' }, history: [] };
+  return { core: {
+    world: emptyVersioned(), style: emptyVersioned(),
+    constraints: emptyVersioned(), pacing: emptyVersioned(),
+  }, history: [] };
 }
 
 export async function createBook({ premise, title }) {
@@ -39,7 +42,8 @@ export async function createBook({ premise, title }) {
 
 export async function readBook(id) {
   try {
-    return JSON.parse(await readFile(join(bookDir(id), 'book.json'), 'utf8'));
+    const book = JSON.parse(await readFile(join(bookDir(id), 'book.json'), 'utf8'));
+    return migrateBookInPlace(book);
   } catch (err) {
     if (err.code === 'ENOENT') throw new Error('BOOK_NOT_FOUND');
     throw err;  // 权限/磁盘/JSON 解析等真实故障原样上抛，不掩盖
@@ -59,7 +63,14 @@ export async function listBooks() {
   for (const id of ids) {
     try {
       const b = JSON.parse(await readFile(join(bookDir(id), 'book.json'), 'utf8'));
-      out.push({ id: b.id, title: b.title, updatedAt: b.updatedAt });
+      let chapterCount = 0;
+      for (const sid of b.sections || []) {
+        try {
+          const sec = JSON.parse(await readFile(join(bookDir(id), safeId(sid), 'section.json'), 'utf8'));
+          chapterCount += (sec.chapters || []).length;
+        } catch { /* 缺失的部跳过 */ }
+      }
+      out.push({ id: b.id, title: b.title, updatedAt: b.updatedAt, sectionCount: (b.sections || []).length, chapterCount });
     } catch (err) {
       if (err.code === 'ENOENT') continue;  // 非书目录（无 book.json）跳过
       if (err.message === 'BAD_ID') continue;  // 非法目录名（如 .DS_Store）跳过
@@ -102,8 +113,8 @@ export async function addChapter(bookId, sectionId, { title }) {
   const id = `chapter-${pad2(index)}`;
   const chapter = {
     id, index, title: title || `第 ${index} 章`,
-    content: '', characters: [], summary: '', progress: '',
-    status: 'done', history: [],
+    body: emptyVersioned(), content: '',
+    characters: [], summary: '', progress: '', status: 'done',
   };
   await atomicWriteJson(join(bookDir(bookId), sectionId, `${id}.json`), chapter);
   section.chapters.push(id);
@@ -111,9 +122,11 @@ export async function addChapter(bookId, sectionId, { title }) {
   return chapter;
 }
 export async function readChapter(bookId, sectionId, chapterId) {
-  return JSON.parse(await readFile(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), 'utf8'));
+  const ch = JSON.parse(await readFile(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), 'utf8'));
+  return migrateChapterInPlace(ch);
 }
 export async function writeChapter(bookId, sectionId, chapterId, obj) {
+  if (obj.body) obj.content = currentText(obj.body);  // 派生 content 与 body 保持同步
   await atomicWriteJson(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), obj);
 }
 
@@ -144,6 +157,23 @@ export function migrateVersioned(old) {
     return { versions, cursor: versions.length - 1 };
   }
   return emptyVersioned();
+}
+// ——— 惰性迁移辅助（读盘时把老结构就地升级为新结构）———
+function migrateBookInPlace(book) {
+  book.outline = migrateVersioned(book.outline);
+  book.settings = book.settings || { core: {}, history: [] };
+  const core = book.settings.core || {};
+  for (const f of ['world', 'style', 'constraints', 'pacing']) core[f] = migrateVersioned(core[f]);
+  book.settings.core = core;
+  return book;
+}
+function migrateChapterInPlace(ch) {
+  if (!ch.body || !Array.isArray(ch.body.versions)) {
+    ch.body = migrateVersioned({ content: ch.content, history: ch.history });
+  }
+  ch.content = currentText(ch.body);  // 派生只读
+  delete ch.history;                  // 老字段清理
+  return ch;
 }
 // 版本路径解析（白名单，防注入）
 export function parseVersionPath(path) {
@@ -196,4 +226,47 @@ export async function writeConfig(patch) {
   await mkdir(DATA_ROOT, { recursive: true });
   await atomicWriteJson(configPath(), next);
   return next;
+}
+
+// ——— 书架管理 ———
+export async function deleteBook(id) {
+  // 递归删除整个书目录（幂等）；safeId 校验发生在 bookDir 里
+  await rm(bookDir(id), { recursive: true, force: true });
+}
+export async function renameBook(id, title) {
+  const book = await readBook(id);
+  book.title = title || book.title;
+  await writeBook(id, book);
+  return book;
+}
+
+// ——— 统一版本读写 ———
+// path 形如：'outline' | 'core:world|style|constraints|pacing' | 'section:<sid>:chapter:<cid>'
+export async function versionMove(bookId, path, delta) {
+  const p = parseVersionPath(path);
+  if (p.type === 'chapter') {
+    const ch = await readChapter(bookId, p.sectionId, p.chapterId);
+    moveCursor(ch.body, delta);
+    await writeChapter(bookId, p.sectionId, p.chapterId, ch);
+    return ch.body;
+  }
+  const b = await readBook(bookId);
+  const vf = p.type === 'outline' ? b.outline : b.settings.core[p.field];
+  moveCursor(vf, delta);
+  await writeBook(bookId, b);
+  return vf;
+}
+export async function versionSet(bookId, path, text) {
+  const p = parseVersionPath(path);
+  if (p.type === 'chapter') {
+    const ch = await readChapter(bookId, p.sectionId, p.chapterId);
+    commitVersion(ch.body, text);
+    await writeChapter(bookId, p.sectionId, p.chapterId, ch);
+    return ch.body;
+  }
+  const b = await readBook(bookId);
+  const vf = p.type === 'outline' ? b.outline : b.settings.core[p.field];
+  commitVersion(vf, text);
+  await writeBook(bookId, b);
+  return vf;
 }

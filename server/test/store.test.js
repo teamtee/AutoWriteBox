@@ -14,7 +14,7 @@ test('createBook 建书并可读回', async () => {
   assert.match(book.id, /^book_/);
   assert.equal(book.premise, '写一个赛博朋克侦探故事');
   assert.deepEqual(book.sections, []);
-  assert.deepEqual(book.outline, { content: '', history: [] });
+  assert.deepEqual(book.outline, { versions: [''], cursor: 0 });
   const back = await store.readBook(book.id);
   assert.equal(back.title, '测试书');
 });
