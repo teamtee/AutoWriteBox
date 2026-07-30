@@ -31,35 +31,29 @@ export function mountBookRoutes(app) {
     res.json(await store.addChapter(req.params.id, req.params.sid, { title: req.body?.title }));
   });
 
-  app.put('/api/books/:id/outline', async (req, res) => {
-    const book = await store.readBook(req.params.id);
-    store.pushHistory(book, 'outline');
-    book.outline.content = req.body?.content ?? '';
-    await store.writeBook(req.params.id, book);
-    res.json(book.outline);
+  // ——— 统一版本操作 ———
+  app.post('/api/books/:id/version/move', async (req, res) => {
+    try {
+      const vf = await store.versionMove(req.params.id, req.body?.path, Number(req.body?.delta) || 0);
+      res.json(vf);
+    } catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+  });
+  app.post('/api/books/:id/version/clear', async (req, res) => {
+    try { res.json(await store.versionSet(req.params.id, req.body?.path, '')); }
+    catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+  });
+  app.post('/api/books/:id/version/save', async (req, res) => {
+    try { res.json(await store.versionSet(req.params.id, req.body?.path, req.body?.text ?? '')); }
+    catch (e) { res.status(400).json({ error: String(e.message || e) }); }
   });
 
-  app.put('/api/books/:id/core', async (req, res) => {
-    const book = await store.readBook(req.params.id);
-    book.settings.history = book.settings.history || [];
-    book.settings.history.push(JSON.stringify(book.settings.core));  // 存档旧核心设定
-    book.settings.core = { ...book.settings.core, ...(req.body?.core || {}) };
-    await store.writeBook(req.params.id, book);
-    res.json(book.settings);
+  // ——— 书架管理 ———
+  app.delete('/api/books/:id', async (req, res) => {
+    try { await store.deleteBook(req.params.id); res.json({ ok: true }); }
+    catch (e) { res.status(400).json({ error: String(e.message || e) }); }
   });
-
-  app.put('/api/books/:id/sections/:sid/chapters/:cid', async (req, res) => {
-    const ch = await store.readChapter(req.params.id, req.params.sid, req.params.cid);
-    store.pushHistory(ch, 'content');
-    ch.content = req.body?.content ?? '';
-    await store.writeChapter(req.params.id, req.params.sid, req.params.cid, ch);
-    res.json({ ok: true });
-  });
-
-  app.post('/api/books/:id/sections/:sid/chapters/:cid/rollback', async (req, res) => {
-    const ch = await store.readChapter(req.params.id, req.params.sid, req.params.cid);
-    const ok = store.rollback(ch, 'content');
-    if (ok) await store.writeChapter(req.params.id, req.params.sid, req.params.cid, ch);
-    res.json({ ok });
+  app.patch('/api/books/:id', async (req, res) => {
+    try { res.json(await store.renameBook(req.params.id, req.body?.title)); }
+    catch (e) { res.status(400).json({ error: String(e.message || e) }); }
   });
 }
