@@ -119,6 +119,42 @@ export async function writeChapter(bookId, sectionId, chapterId, obj) {
 
 // ——— history 回退栈（限深 20）———
 const HISTORY_MAX = 20;
+
+// ——— 可版本化字段原语（纯函数）———
+export function emptyVersioned() { return { versions: [''], cursor: 0 }; }
+export function currentText(vf) { return (vf && Array.isArray(vf.versions)) ? (vf.versions[vf.cursor] ?? '') : ''; }
+export function commitVersion(vf, text) {
+  vf.versions.push(text ?? '');
+  while (vf.versions.length > HISTORY_MAX) { vf.versions.shift(); if (vf.cursor > 0) vf.cursor--; }
+  vf.cursor = vf.versions.length - 1;
+  return vf;
+}
+export function moveCursor(vf, delta) {
+  const n = vf.cursor + delta;
+  if (n < 0 || n >= vf.versions.length) return false;
+  vf.cursor = n; return true;
+}
+// 老结构 → 新结构：新结构原样 / 字符串→单版 / {content,history}→合并 / 其它→空
+export function migrateVersioned(old) {
+  if (old && Array.isArray(old.versions)) return old;
+  if (typeof old === 'string') return { versions: [old], cursor: 0 };
+  if (old && (typeof old.content === 'string' || Array.isArray(old.history))) {
+    const history = Array.isArray(old.history) ? old.history : [];
+    const versions = [...history, old.content ?? ''];
+    return { versions, cursor: versions.length - 1 };
+  }
+  return emptyVersioned();
+}
+// 版本路径解析（白名单，防注入）
+export function parseVersionPath(path) {
+  if (typeof path !== 'string') throw new Error('BAD_PATH');
+  if (path === 'outline') return { type: 'outline' };
+  const core = path.match(/^core:(world|style|constraints|pacing)$/);
+  if (core) return { type: 'core', field: core[1] };
+  const ch = path.match(/^section:([\w-]+):chapter:([\w-]+)$/);
+  if (ch) return { type: 'chapter', sectionId: safeId(ch[1]), chapterId: safeId(ch[2]) };
+  throw new Error('BAD_PATH');
+}
 export function pushHistory(obj, field) {
   if (field === 'content') {
     obj.history = obj.history || [];
