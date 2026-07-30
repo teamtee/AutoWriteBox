@@ -1,24 +1,28 @@
-import type { Book, BookTree, Config } from './types';
+import type { Book, BookTree, BookSummary, Config } from './types';
 
 const json = (r: Response) => r.json();
 const jpost = (p: string, b: unknown) =>
   fetch(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json);
-const jput = (p: string, b: unknown) =>
-  fetch(p, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json);
 
 export const getConfig = (): Promise<Config> => fetch('/api/config').then(json);
 export const saveConfig = (patch: Partial<Config>): Promise<Config> => jpost('/api/config', patch);
-export const listBooks = () => fetch('/api/books').then(json);
+
+export const listBooks = (): Promise<BookSummary[]> => fetch('/api/books').then(json);
 export const createBook = (premise: string, title?: string): Promise<Book> => jpost('/api/books', { premise, title });
 export const getTree = (bookId: string): Promise<BookTree> => fetch(`/api/books/${bookId}/tree`).then(json);
 export const addSection = (bookId: string, title?: string) => jpost(`/api/books/${bookId}/sections`, { title });
 export const addChapter = (bookId: string, sid: string, title?: string) => jpost(`/api/books/${bookId}/sections/${sid}/chapters`, { title });
-export const saveChapter = (bookId: string, sid: string, cid: string, content: string) =>
-  jput(`/api/books/${bookId}/sections/${sid}/chapters/${cid}`, { content });
-export const rollbackChapter = (bookId: string, sid: string, cid: string) =>
-  jpost(`/api/books/${bookId}/sections/${sid}/chapters/${cid}/rollback`, {});
-export const saveOutline = (bookId: string, content: string) => jput(`/api/books/${bookId}/outline`, { content });
-export const saveCore = (bookId: string, core: unknown) => jput(`/api/books/${bookId}/core`, { core });
+
+// 书架管理
+export const deleteBook = (bookId: string) => fetch(`/api/books/${bookId}`, { method: 'DELETE' }).then(json);
+export const renameBook = (bookId: string, title: string) =>
+  fetch(`/api/books/${bookId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) }).then(json);
+
+// 统一版本操作
+export const versionMove = (bookId: string, path: string, delta: number) => jpost(`/api/books/${bookId}/version/move`, { path, delta });
+export const versionClear = (bookId: string, path: string) => jpost(`/api/books/${bookId}/version/clear`, { path });
+export const versionSave = (bookId: string, path: string, text: string) => jpost(`/api/books/${bookId}/version/save`, { path, text });
+export const rewriteUrl = (bookId: string) => `/api/books/${bookId}/version/rewrite`;
 
 export interface SSEEvent { delta?: string; done?: boolean; error?: string; chapterId?: string; sections?: string; }
 
