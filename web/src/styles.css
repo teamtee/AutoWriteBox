@@ -86,3 +86,24 @@ pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; margi
   margin-left: auto; border: none; background: transparent;
   color: var(--ink-soft); font-size: 18px; line-height: 1;
 }
+
+/* ===== 模态遮罩 & 分部面板 ===== */
+.modal-mask {
+  position: fixed; inset: 0; z-index: 900;
+  background: rgba(0,0,0,.35);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+}
+.plan-panel {
+  width: min(560px, 92vw); max-height: 82vh; overflow: auto;
+  padding: 20px 24px; display: flex; flex-direction: column; gap: 14px;
+}
+.plan-panel h2 { margin: 0; }
+.plan-text {
+  min-height: 120px; max-height: 40vh; overflow: auto;
+  padding: 12px; border: 1px dashed var(--line); border-radius: 8px;
+  color: var(--ink); line-height: 1.8;
+}
+.plan-preview { color: var(--ink-soft); }
+.plan-preview ol { margin: 6px 0 0; padding-left: 22px; color: var(--ink); }
+.plan-actions { display: flex; gap: 12px; justify-content: flex-end; }
