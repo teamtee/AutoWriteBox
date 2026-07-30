@@ -107,3 +107,19 @@ pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; margi
 .plan-preview { color: var(--ink-soft); }
 .plan-preview ol { margin: 6px 0 0; padding-left: 22px; color: var(--ink); }
 .plan-actions { display: flex; gap: 12px; justify-content: flex-end; }
+
+/* ===== 顶栏 ===== */
+.topbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 2px solid var(--line);
+  background: var(--panel);
+}
+.topbar-title { font-size: 22px; font-weight: 700; }
+.topbar-status { color: var(--accent-2); display: flex; align-items: center; gap: 6px; }
+.topbar-actions { margin-left: auto; display: flex; gap: 10px; }
+.dots::after {
+  content: '…'; display: inline-block; width: 1.2em;
+  animation: dots 1.2s steps(4, end) infinite; overflow: hidden; vertical-align: bottom;
+}
+@keyframes dots { from { width: 0 } to { width: 1.2em } }
