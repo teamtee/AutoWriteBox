@@ -1,7 +1,7 @@
 import * as store from '../store.js';
 import {
   buildSystemPrompt, buildContext, buildChapterInstruction,
-  buildOutlineInstruction, buildSectionsInstruction, DIGEST_INSTRUCTION,
+  buildOutlineInstruction, buildSectionsInstruction, buildCoreFieldInstruction, DIGEST_INSTRUCTION,
 } from '../prompts.js';
 import { extractDigest as defaultExtract } from '../llm.js';
 
@@ -26,17 +26,21 @@ export function mountGenRoutes(app, deps = {}) {
     return full;
   }
 
-  app.post('/api/gen/outline', async (req, res) => {
+  app.post('/api/books/:id/version/rewrite', async (req, res) => {
     sseInit(res);
     try {
+      const { path } = req.body || {};
+      const p = store.parseVersionPath(path);       // 非法 path 抛 BAD_PATH
+      if (p.type === 'chapter') throw new Error('章节请用 /api/gen/chapter');
       const config = await store.readConfig();
-      const book = await store.readBook(req.body.bookId);
+      const book = await store.readBook(req.params.id);
       const system = buildSystemPrompt(book.settings.core);
-      const full = await streamInto(res, { config, system, instruction: buildOutlineInstruction(book.premise) });
-      store.pushHistory(book, 'outline');
-      book.outline.content = full;
-      await store.writeBook(book.id, book);
-      send(res, { done: true });
+      const instruction = p.type === 'outline'
+        ? buildOutlineInstruction(book.premise)
+        : buildCoreFieldInstruction(p.field, book);
+      const full = await streamInto(res, { config, system, instruction });
+      const vf = await store.versionSet(req.params.id, path, full);
+      send(res, { done: true, versions: vf.versions, cursor: vf.cursor });
     } catch (e) { send(res, { error: String(e.message || e) }); }
     res.end();
   });
@@ -76,7 +80,6 @@ export function mountGenRoutes(app, deps = {}) {
         createdChapterId = chapterId;
       } else {
         chapter = await store.readChapter(bookId, sectionId, chapterId);
-        store.pushHistory(chapter, 'content');
       }
 
       // 上一章（用于上下文路标）：本章之前的最后一章
@@ -91,7 +94,7 @@ export function mountGenRoutes(app, deps = {}) {
         buildChapterInstruction({ chapterIndex: chapter.index, wordTarget: config.chapterWordTarget, mode, whip });
 
       full = await streamInto(res, { config, system, instruction });
-      chapter.content = full;
+      store.commitVersion(chapter.body, full);      // 写入新版；writeChapter 会同步派生 content
       await store.writeChapter(bookId, sectionId, chapterId, chapter);
 
       // —— 自动 digest（失败不阻塞）——

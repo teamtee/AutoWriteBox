@@ -42,10 +42,8 @@ async function readSSE(res) {
   return out;
 }
 
-// TODO(Task 5): gen/chapter 在 Task 5 会改写为 commitVersion(chapter.body, ...)；当前 Task 2 落地后，
-// gen 路由直接写 chapter.content 会被 writeChapter 从 body 派生覆盖为空——Task 5 会把断言换成
-// store.currentText(ch.body) === '这是正文'。这里先跳过，避免虚假红。
-test('gen/chapter next 生成正文并落盘 + digest 冒泡', { skip: 'Task 5 将把断言改为读 chapter.body（版本化）' }, async () => {
+// gen/chapter 正文写入 chapter.body（版本化），content 由 writeChapter 从 body 派生
+test('gen/chapter next 生成正文并落盘 + digest 冒泡', async () => {
   await withServer(async () => {
     const book = await j(await post('/api/books', { premise: 'p' }));
     const s = await j(await post(`/api/books/${book.id}/sections`, {}));
@@ -58,6 +56,8 @@ test('gen/chapter next 生成正文并落盘 + digest 冒泡', { skip: 'Task 5 �
     const sec = await store.readSection(book.id, s.id);
     assert.equal(sec.chapters.length, 1);
     const ch = await store.readChapter(book.id, s.id, sec.chapters[0]);
+    // 正文进入版本化 body；content 仍等值（派生）
+    assert.equal(store.currentText(ch.body), '这是正文');
     assert.equal(ch.content, '这是正文');
     assert.equal(ch.summary, '小结A');
     assert.equal(ch.progress, '下一步B');
@@ -69,18 +69,41 @@ test('gen/chapter next 生成正文并落盘 + digest 冒泡', { skip: 'Task 5 �
   });
 });
 
-test('gen/outline 生成后写入 book.outline', async () => {
+test('version/rewrite path=outline 流式生成后写入 book.outline（版本化）', async () => {
   await withServer(async () => {
     const book = await j(await post('/api/books', { premise: '写侦探故事' }));
-    const res = await post('/api/gen/outline', { bookId: book.id });
-    await readSSE(res);
+    const res = await post(`/api/books/${book.id}/version/rewrite`, { path: 'outline' });
+    const sse = await readSSE(res);
+    assert.match(sse, /"done":true/);
     const bk = await store.readBook(book.id);
-    assert.equal(bk.outline.content, '这是正文');
+    assert.equal(store.currentText(bk.outline), '这是正文');
   });
 });
 
-// TODO(Task 5): 同上——正文断言 ch.content === '这是正文' 现被 body 派生覆盖为 ''。Task 5 改断言为 currentText(ch.body)。
-test('gen/chapter digest 解析失败时不覆盖已有 progress/summary（断片保护）', { skip: 'Task 5 将把断言改为读 chapter.body（版本化）' }, async () => {
+test('version/rewrite path=core:world 写入 settings.core.world（版本化）', async () => {
+  await withServer(async () => {
+    const book = await j(await post('/api/books', { premise: '写侦探故事' }));
+    const res = await post(`/api/books/${book.id}/version/rewrite`, { path: 'core:world' });
+    const sse = await readSSE(res);
+    assert.match(sse, /"done":true/);
+    const bk = await store.readBook(book.id);
+    assert.equal(store.currentText(bk.settings.core.world), '这是正文');
+  });
+});
+
+test('version/rewrite 章节 path 报错，不走章节管线', async () => {
+  await withServer(async () => {
+    const book = await j(await post('/api/books', { premise: 'p' }));
+    const res = await post(`/api/books/${book.id}/version/rewrite`, {
+      path: 'section:section-01:chapter:chapter-01',
+    });
+    const sse = await readSSE(res);
+    assert.match(sse, /"error"/);
+    assert.match(sse, /章节请用/);
+  });
+});
+
+test('gen/chapter digest 解析失败时不覆盖已有 progress/summary（断片保护）', async () => {
   // 变体：正文正常，digest 返回不可解析的 JSON 文本
   const badDigestDeps = {
     async *streamChat() { yield '这是'; yield '正文'; },
@@ -105,7 +128,8 @@ test('gen/chapter digest 解析失败时不覆盖已有 progress/summary（断�
     const sec = await store.readSection(book.id, s.id);
     assert.equal(sec.chapters.length, 1);
     const ch = await store.readChapter(book.id, s.id, sec.chapters[0]);
-    // 正文已落盘
+    // 正文已落盘（版本化 body）
+    assert.equal(store.currentText(ch.body), '这是正文');
     assert.equal(ch.content, '这是正文');
     // 已有 progress/summary 未被空值覆盖
     const bk = await store.readBook(book.id);
