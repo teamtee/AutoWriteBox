@@ -1,8 +1,8 @@
 import { useState } from 'react';
 
-export function Actions({ streaming, onRewrite, onNext, onWhip, onStop }: {
+// 章节专属动作条：仅保留「下一章 / 抽打」；重写与上一版已内置进版本化框工具条
+export function Actions({ streaming, onNext, onWhip, onStop }: {
   streaming: boolean;
-  onRewrite: () => void;
   onNext: () => void;
   onWhip: (text: string) => void;
   onStop: () => void;
@@ -15,7 +15,6 @@ export function Actions({ streaming, onRewrite, onNext, onWhip, onStop }: {
       ) : (
         <>
           <div className="btn-row">
-            <button className="hbtn" onClick={onRewrite}>🔄 重写</button>
             <button className="hbtn accent-2" onClick={onNext}>➡️ 下一章</button>
           </div>
           <div className="whip-row">

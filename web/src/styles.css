@@ -250,3 +250,6 @@ pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; margi
 .shelf-meta { color: var(--ink-soft); font-size: 13px; }
 .shelf-meta.dim { opacity: .7; }
 .shelf-ops { margin-top: auto; display: flex; gap: 6px; }
+
+/* 章节视图正文框与底部动作条留白 */
+.content .main { padding-bottom: 8px; }
