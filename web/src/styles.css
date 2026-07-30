@@ -1,15 +1,70 @@
-.layout { display: flex; height: 100vh; }
-.sidebar { width: 240px; overflow: auto; border-right: 1px solid #ddd; padding: 12px; }
-.content { flex: 1; display: flex; flex-direction: column; }
-.main { flex: 1; overflow: auto; padding: 16px; }
-.editor { width: 100%; height: 100%; min-height: 300px; }
-.nav-item { padding: 4px 6px; cursor: pointer; border-radius: 4px; }
-.nav-item.active { background: #eef; }
-.actions { border-top: 1px solid #ddd; padding: 12px; }
-.btn-row { display: flex; gap: 8px; }
-.whip-row { display: flex; gap: 8px; margin-top: 8px; }
-.whip-row textarea { flex: 1; height: 48px; }
-.core-form { display: flex; flex-direction: column; gap: 12px; max-width: 720px; }
-.core-form label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; }
-.core-form textarea { width: 100%; font: inherit; padding: 6px; }
-.core-form button { align-self: flex-start; padding: 6px 16px; }
+/* ===== 字体（best-effort 打包，系统手写体兜底）===== */
+@font-face {
+  font-family: 'NovelHand';
+  src: url('/fonts/handwriting.woff2') format('woff2');
+  font-display: swap;
+}
+
+/* ===== 主题变量 ===== */
+:root[data-theme="paper"] {
+  --bg: #f4efe4; --panel: #fbf8f0;
+  --ink: #2b2620; --ink-soft: #6b6154;
+  --line: #3a332a; --accent: #c0392b; --accent-2: #2e7d68;
+  --shadow: rgba(0,0,0,.15);
+}
+:root[data-theme="blackboard"] {
+  --bg: #26302c; --panel: #2f3a35;
+  --ink: #f0ebe0; --ink-soft: #b8b0a0;
+  --line: #d8d0c0; --accent: #e8a24a; --accent-2: #7fc8a9;
+  --shadow: rgba(0,0,0,.4);
+}
+/* 未设属性时的默认（= paper） */
+:root { color-scheme: light; }
+
+/* ===== 全局 reset & 排版 ===== */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'NovelHand', 'KaiTi', 'STKaiti', '楷体', 'Comic Sans MS', cursive, sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+  transition: background .3s, color .3s;
+}
+h1, h2, h3 { font-weight: 700; letter-spacing: .5px; }
+button { font-family: inherit; cursor: pointer; }
+textarea, input { font-family: inherit; color: var(--ink); }
+pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; margin: 0; }
+
+/* ===== 手绘描边基元 ===== */
+.sketch {
+  border: 2px solid var(--line);
+  border-radius: 255px 15px 225px 15px / 15px 225px 15px 255px;
+  box-shadow: 2px 2px 0 var(--shadow);
+  background: var(--panel);
+}
+.sketch-alt {
+  border-radius: 15px 225px 15px 255px / 225px 15px 255px 15px;
+}
+
+/* ===== 通用手绘按钮 ===== */
+.hbtn {
+  border: 2px solid var(--line);
+  border-radius: 15px 225px 15px 255px / 225px 15px 255px 15px;
+  background: var(--panel);
+  color: var(--ink);
+  padding: 8px 16px;
+  box-shadow: 2px 2px 0 var(--shadow);
+  transition: transform .08s, box-shadow .08s;
+}
+.hbtn:hover { transform: translate(-1px,-1px); box-shadow: 3px 3px 0 var(--shadow); }
+.hbtn:active { transform: translate(1px,1px); box-shadow: 1px 1px 0 var(--shadow); }
+.hbtn:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.hbtn.dashed { border-style: dashed; box-shadow: none; }
+.hbtn.accent { border-color: var(--accent); color: var(--accent); }
+.hbtn.accent-2 { border-color: var(--accent-2); color: var(--accent-2); }
+
+/* ===== 流式光标 ===== */
+@keyframes blink { 0%,49% { opacity: 1 } 50%,100% { opacity: 0 } }
+.cursor { color: var(--accent); animation: blink 1s step-end infinite; font-weight: 700; }

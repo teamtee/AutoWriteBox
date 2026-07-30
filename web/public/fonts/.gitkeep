@@ -1,0 +1,2 @@
+# 占位：确保 public/fonts 目录在 git 中存在。
+# 字体文件 handwriting.woff2 由构建流程按需下载；缺失时 @font-face 回退到系统楷体。
