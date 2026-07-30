@@ -138,7 +138,7 @@ export function emptyVersioned() { return { versions: [''], cursor: 0 }; }
 export function currentText(vf) { return (vf && Array.isArray(vf.versions)) ? (vf.versions[vf.cursor] ?? '') : ''; }
 export function commitVersion(vf, text) {
   vf.versions.push(text ?? '');
-  while (vf.versions.length > HISTORY_MAX) { vf.versions.shift(); if (vf.cursor > 0) vf.cursor--; }
+  while (vf.versions.length > HISTORY_MAX) vf.versions.shift();
   vf.cursor = vf.versions.length - 1;
   return vf;
 }

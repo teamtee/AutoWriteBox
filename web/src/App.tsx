@@ -44,7 +44,8 @@ export default function App() {
   const reload = async (bookId: string, sel?: Selection) => {
     const t = await api.getTree(bookId); setTree(t); if (sel) setSelection(sel);
   };
-  const goShelf = async () => { setView('shelf'); await loadShelf(); };
+  // 返回书架前先停掉任意进行中的流，避免离开后仍有 SSE 回调改状态
+  const goShelf = async () => { if (streaming) stopGen(); setView('shelf'); await loadShelf(); };
 
   if (showSettings) return <SettingsPage onClose={() => setShowSettings(false)} />;
   if (loading) return <div className="boot-skeleton"><div className="sk-line" /><div className="sk-line" /><div className="sk-line short" /></div>;
@@ -143,7 +144,8 @@ export default function App() {
           <MainPanel tree={tree} selection={selection}
             streaming={streaming} streamingText={streamingText} streamingPath={streamingPath}
             onMove={doMove} onRewrite={doRewrite} onClear={doClear} onSave={doSave} onStop={stopGen} />
-          {selection.kind === 'chapter' &&
+          {/* 流式期间由 VersionedBox 工具条负责 Stop，Actions 隐藏避免双 Stop 按钮 */}
+          {selection.kind === 'chapter' && !streaming &&
             <Actions streaming={streaming} onNext={() => runChapter('next')} onWhip={(t) => runChapter('whip', t)} onStop={stopGen} />}
         </div>
       </div>

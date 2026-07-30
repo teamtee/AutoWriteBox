@@ -54,7 +54,8 @@ export function mountGenRoutes(app, deps = {}) {
       const system = buildSystemPrompt(book.settings.core);
       const full = await streamInto(res, {
         config, system,
-        instruction: buildSectionsInstruction(book.outline.content),
+        // outline 迁移后是 {versions,cursor}，需通过 currentText 读当前版本；直接 .content 会得到 undefined
+        instruction: buildSectionsInstruction(store.currentText(book.outline)),
       });
       send(res, { done: true, sections: full });
     } catch (e) { send(res, { error: String(e.message || e) }); }

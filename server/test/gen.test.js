@@ -140,22 +140,27 @@ test('gen/chapter digest 解析失败时不覆盖已有 progress/summary（断�
 });
 
 test('gen/sections 流式返回分部建议，不自动建部', async () => {
+  // 用闭包记录 fake LLM 收到的 instruction，验证版本化 outline 的当前文本真的被传入
+  let capturedInstruction = '';
   const secDeps = {
-    async *streamChat() { yield '第 1 部'; yield ' · 起源：xxx'; },
+    async *streamChat({ messages }) {
+      capturedInstruction = messages?.[0]?.content ?? '';
+      yield '第 1 部'; yield ' · 起源：xxx';
+    },
     async nonStreamChat() { return ''; },
   };
   await withServer(async () => {
     const book = await j(await post('/api/books', { premise: '写侦探故事' }));
-    // 先给 book.outline 塞点内容
-    const bk = await store.readBook(book.id);
-    bk.outline.content = '全书总大纲：...';
-    await store.writeBook(book.id, bk);
+    // 通过 versionSet 走版本化写路径（不能直接 book.outline.content = ...，那样迁移后读不到）
+    await store.versionSet(book.id, 'outline', '我的全书大纲XYZ');
 
     const res = await post('/api/gen/sections', { bookId: book.id });
     const sse = await readSSE(res);
     assert.match(sse, /第 1 部/);
     assert.match(sse, /"done":true/);
     assert.match(sse, /"sections":/);
+    // 关键断言：outline 当前版本文本真的到了 LLM 指令里（迁移契约端到端）
+    assert.match(capturedInstruction, /我的全书大纲XYZ/);
     // 不自动建部
     const bk2 = await store.readBook(book.id);
     assert.deepEqual(bk2.sections, []);
