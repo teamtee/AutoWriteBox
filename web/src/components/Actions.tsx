@@ -9,19 +9,19 @@ export function Actions({ streaming, onRewrite, onNext, onWhip, onStop }: {
 }) {
   const [whip, setWhip] = useState('');
   return (
-    <div className="actions">
+    <div className="actions sketch">
       {streaming ? (
-        <button className="stop" onClick={onStop}>⏹ 停止</button>
+        <button className="hbtn stop" onClick={onStop}>⏹ 停止</button>
       ) : (
         <>
           <div className="btn-row">
-            <button onClick={onRewrite}>🔄 重写</button>
-            <button onClick={onNext}>➡️ 下一章</button>
+            <button className="hbtn" onClick={onRewrite}>🔄 重写</button>
+            <button className="hbtn accent-2" onClick={onNext}>➡️ 下一章</button>
           </div>
           <div className="whip-row">
-            <textarea placeholder="狠狠抽打：写下你的不满与要求…" value={whip}
+            <textarea className="whip-input" placeholder="狠狠抽打：写下你的不满与要求…" value={whip}
               onChange={(e) => setWhip(e.target.value)} />
-            <button onClick={() => { if (whip.trim()) { onWhip(whip); setWhip(''); } }}>🗯️ 抽</button>
+            <button className="hbtn accent whip-btn" onClick={() => { if (whip.trim()) { onWhip(whip); setWhip(''); } }}>🗯️ 抽</button>
           </div>
         </>
       )}

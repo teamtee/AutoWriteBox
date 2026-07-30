@@ -176,3 +176,37 @@ pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; margi
   border-radius: 12px; background: var(--bg); resize: vertical; font-weight: 400;
 }
 .core-form button { align-self: flex-start; }
+
+/* ===== 底部动作条 ===== */
+.actions { margin: 0 16px 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.btn-row { display: flex; gap: 12px; }
+.whip-row { display: flex; gap: 12px; align-items: stretch; }
+.whip-input {
+  flex: 1; min-height: 52px; padding: 10px; resize: vertical;
+  border: 2px solid var(--line); border-radius: 12px; background: var(--bg);
+}
+.whip-input:focus { outline: none; border-color: var(--accent); }
+.whip-btn { font-size: 18px; padding: 8px 22px; }
+.stop {
+  width: 100%; border-color: var(--accent); color: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100% { box-shadow: 2px 2px 0 var(--shadow); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent); }
+}
+
+/* ===== 设置页 / 开篇页 ===== */
+.settings-page { max-width: 720px; margin: 32px auto; padding: 0 16px; }
+.settings-page input {
+  padding: 10px; border: 2px solid var(--line); border-radius: 12px;
+  background: var(--bg); font-weight: 400;
+}
+.first-run { display: flex; align-items: center; justify-content: center; height: 100%; padding: 24px; }
+.first-card { max-width: 560px; width: 100%; text-align: center; display: flex; flex-direction: column; gap: 16px; }
+.first-lead { color: var(--ink-soft); margin: 0; }
+.first-input {
+  min-height: 96px; padding: 12px; resize: vertical;
+  border: 2px solid var(--line); border-radius: 12px; background: var(--bg);
+}
+.first-card .hbtn { align-self: center; padding: 10px 28px; font-size: 18px; }
