@@ -1,19 +1,26 @@
 function line(label, value) { return value ? `【${label}】${value}\n` : ''; }
 
+// 读取可版本化字段的当前文本；兼容 {versions,cursor} / {content} / 字符串 / 空
+function vtext(f) {
+  if (!f) return '';
+  if (Array.isArray(f.versions)) return f.versions[f.cursor] ?? '';
+  if (typeof f.content === 'string') return f.content;
+  return typeof f === 'string' ? f : '';
+}
+
 export function buildSystemPrompt(core = {}) {
-  const { world, style, constraints, pacing } = core;
   let s = '你是一位小说写手。严格遵守以下设定：\n';
-  s += line('世界观', world);
-  s += line('文风基调', style);
-  s += line('禁忌约束', constraints);   // 硬约束，最高优先级
-  s += line('篇幅节奏', pacing);
+  s += line('世界观', vtext(core.world));
+  s += line('文风基调', vtext(core.style));
+  s += line('禁忌约束', vtext(core.constraints));   // 硬约束，最高优先级
+  s += line('篇幅节奏', vtext(core.pacing));
   return s.trim();
 }
 
 export function buildContext({ book = {}, section = {}, prevChapter = null }) {
   const chars = (arr) => (arr || []).map((c) => `- ${c.name}（${c.role}）：${c.desc}`).join('\n');
   let s = '';
-  s += line('全书大纲', book.outline?.content);
+  s += line('全书大纲', vtext(book.outline));
   s += line('本部大纲', section.outline?.content);
   s += line('本部前情', section.summary);
   const mainC = chars(book.characters);
@@ -48,3 +55,15 @@ export const DIGEST_INSTRUCTION =
   '请阅读上文这一章正文，返回严格的 JSON（不要多余文字），格式：' +
   '{"summary":"本章50字内小结","progress":"下一步剧情走向","newCharacters":[{"name":"名","role":"身份","desc":"简述"}]}。' +
   '若无新登场人物，newCharacters 为空数组。';
+
+export function buildCoreFieldInstruction(field, book) {
+  const names = { world: '世界观', style: '文风基调', constraints: '禁忌约束', pacing: '篇幅节奏' };
+  const core = (book.settings && book.settings.core) || {};
+  let others = '';
+  for (const k of Object.keys(names)) {
+    if (k === field) continue;
+    others += line(names[k], vtext(core[k]));
+  }
+  return `这本书的故事设想：『${book.premise || ''}』。\n已有设定：\n${others}` +
+    `请为这本书重新拟定『${names[field]}』，200 字内，与其它设定保持一致，只输出该项内容，不要解释、不要标题。`;
+}
