@@ -237,6 +237,13 @@ pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; margi
 .vbox-body.editor:focus { outline: 2px dashed var(--line); outline-offset: 6px; border-radius: 8px; }
 .vbox-foot { color: var(--ink-soft); font-size: 13px; text-align: right; }
 
+/* 尺寸变体：sm 紧凑（核心设定子框）/ md 中等 / lg 大（全书大纲、章节正文） */
+.vbox-sm .vbox-title { font-size: 17px; }
+.vbox-sm .vbox-body { min-height: 96px; font-size: 15px; line-height: 1.7; }
+.vbox-md .vbox-body { min-height: 220px; font-size: 16px; }
+.vbox-lg .vbox-title { font-size: 24px; }
+.vbox-lg .vbox-body { min-height: 60vh; font-size: 18px; line-height: 2; }
+
 /* ===== 书架 ===== */
 .shelf { max-width: 960px; margin: 0 auto; padding: 32px 20px; }
 .shelf-title { font-size: 28px; margin: 0 0 20px; }

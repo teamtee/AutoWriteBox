@@ -31,14 +31,14 @@ export function MainPanel({ tree, selection, streaming, streamingText, streaming
   });
 
   if (selection.kind === 'outline') {
-    return <main className="main"><VersionedBox title="全书大纲" versioned={tree.book.outline} {...boxProps('outline')} /></main>;
+    return <main className="main"><VersionedBox title="全书大纲" versioned={tree.book.outline} size="lg" {...boxProps('outline')} /></main>;
   }
 
   if (selection.kind === 'core') {
     return (
       <main className="main">
         {CORE_FIELDS.map(({ field, label }) => (
-          <VersionedBox key={field} title={label} versioned={tree.book.settings.core[field]} {...boxProps(`core:${field}`)} />
+          <VersionedBox key={field} title={label} versioned={tree.book.settings.core[field]} size="sm" {...boxProps(`core:${field}`)} />
         ))}
       </main>
     );
@@ -53,7 +53,7 @@ export function MainPanel({ tree, selection, streaming, streamingText, streaming
   const chStreaming = streaming && streamingPath === 'chapter';
   return (
     <main className="main">
-      <VersionedBox title={chapter.title} versioned={chapter.body}
+      <VersionedBox title={chapter.title} versioned={chapter.body} size="lg"
         streaming={chStreaming} streamingText={chStreaming ? streamingText : ''}
         onMove={(d) => onMove(path, d)} onRewrite={() => onRewrite(path)}
         onClear={() => onClear(path)} onSave={(t) => onSave(path, t)} onStop={onStop} />

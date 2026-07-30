@@ -3,11 +3,13 @@ import type { Versioned } from '../types';
 import { currentText, canPrev, canNext, versionLabel } from '../versioned';
 
 // 通用「版本化框」：标题 + 行内工具条（上一版/重写(或停止)/下一版/删除）+ 主体（流式 pre / 可编辑 textarea）+ 版本徽标
-export function VersionedBox({ title, versioned, streaming, streamingText, onMove, onRewrite, onClear, onSave, onStop }: {
+// size 控制主体高度与字号：sm=紧凑（核心设定子框）/ md=中等 / lg=大（全书大纲、章节正文）
+export function VersionedBox({ title, versioned, streaming, streamingText, size = 'md', onMove, onRewrite, onClear, onSave, onStop }: {
   title: string;
   versioned: Versioned;
   streaming: boolean;
   streamingText: string;
+  size?: 'sm' | 'md' | 'lg';
   onMove: (delta: number) => void;
   onRewrite: () => void;
   onClear: () => void;
@@ -22,7 +24,7 @@ export function VersionedBox({ title, versioned, streaming, streamingText, onMov
   useEffect(() => { setDraft(cur); }, [cur]);
 
   return (
-    <section className="vbox sketch">
+    <section className={`vbox vbox-${size} sketch`}>
       <div className="vbox-head">
         <h3 className="vbox-title">{title}</h3>
         <div className="vbox-tools">
