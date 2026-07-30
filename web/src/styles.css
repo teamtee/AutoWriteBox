@@ -226,3 +226,13 @@ pre { white-space: pre-wrap; word-break: break-word; font-family: inherit; margi
   .sidebar { width: auto; margin: 12px; max-height: 220px; }
   .paper { padding: 16px; }
 }
+
+/* ===== VersionedBox 版本化框 ===== */
+.vbox { padding: 16px 18px; margin: 0 0 16px; display: flex; flex-direction: column; gap: 10px; }
+.vbox-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.vbox-title { margin: 0; font-size: 20px; border-bottom: 2px solid var(--accent); padding-bottom: 2px; }
+.vbox-tools { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.vbox-body { width: 100%; min-height: 180px; font-size: 16px; line-height: 1.8; }
+.vbox-body.editor { border: none; outline: none; background: transparent; resize: vertical; }
+.vbox-body.editor:focus { outline: 2px dashed var(--line); outline-offset: 6px; border-radius: 8px; }
+.vbox-foot { color: var(--ink-soft); font-size: 13px; text-align: right; }
