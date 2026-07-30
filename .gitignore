@@ -4,6 +4,7 @@ data/
 .env
 .DS_Store
 .superpowers/
+.worktrees/
 certs/
 *.tsbuildinfo
 web/vite.config.d.ts
