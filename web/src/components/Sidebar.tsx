@@ -1,38 +1,41 @@
 import type { BookTree } from '../types';
 import type { Selection } from '../store';
 
-export function Sidebar({ tree, selection, onSelect, onAddSection, onAddChapter, onOpenSettings, onPlanSections }: {
-  tree: BookTree; selection: Selection;
+export function Sidebar({ tree, selection, disabled, onSelect, onAddSection, onAddChapter, onPlanSections }: {
+  tree: BookTree; selection: Selection; disabled: boolean;
   onSelect: (s: Selection) => void;
   onAddSection: () => void;
   onAddChapter: (sectionId: string) => void;
-  onOpenSettings: () => void;
   onPlanSections: () => void;
 }) {
   const active = (s: Selection) => JSON.stringify(s) === JSON.stringify(selection) ? 'active' : '';
+  const go = (s: Selection) => { if (!disabled) onSelect(s); };
+  const cls = (s: Selection) => `nav-item ${active(s)} ${disabled ? 'disabled' : ''}`;
   return (
-    <aside className="sidebar">
-      <div className="book-title">📖 {tree.book.title}</div>
-      <div className={`nav-item ${active({ kind: 'outline' })}`} onClick={() => onSelect({ kind: 'outline' })}>全书大纲</div>
-      <div className={`nav-item ${active({ kind: 'core' })}`} onClick={() => onSelect({ kind: 'core' })}>核心设定</div>
+    <aside className={`sidebar sketch ${disabled ? 'locked' : ''}`}>
+      <div className="side-tabs">
+        <div className={`side-tab ${active({ kind: 'outline' })}`} onClick={() => go({ kind: 'outline' })}>📜 全书大纲</div>
+        <div className={`side-tab ${active({ kind: 'core' })}`} onClick={() => go({ kind: 'core' })}>🧭 核心设定</div>
+      </div>
       {tree.sections.map((s) => (
         <div key={s.id} className="section">
           <div className="section-title">{s.title}</div>
-          {s.chapters.map((c) => (
-            <div key={c.id}
-              className={`nav-item chapter ${active({ kind: 'chapter', sectionId: s.id, chapterId: c.id })}`}
-              onClick={() => onSelect({ kind: 'chapter', sectionId: s.id, chapterId: c.id })}>
-              · {c.title} {c.content ? '✓' : ''}
-            </div>
-          ))}
-          <button className="mini" onClick={() => onAddChapter(s.id)}>＋ 加章</button>
+          <div className="chapter-list">
+            {s.chapters.map((c) => (
+              <div key={c.id}
+                className={`${cls({ kind: 'chapter', sectionId: s.id, chapterId: c.id })} chapter`}
+                onClick={() => go({ kind: 'chapter', sectionId: s.id, chapterId: c.id })}>
+                <span>{c.title}</span>{c.content ? <span className="done">✓</span> : null}
+              </div>
+            ))}
+          </div>
+          <button className="hbtn dashed mini" disabled={disabled} onClick={() => onAddChapter(s.id)}>＋ 加章</button>
         </div>
       ))}
-      <div className="btn-row">
-        <button className="mini" onClick={onAddSection}>＋ 新建部</button>
-        <button className="mini" onClick={onPlanSections}>🧩 让 AI 规划分部</button>
+      <div className="side-add">
+        <button className="hbtn dashed mini" disabled={disabled} onClick={onAddSection}>＋ 新建部</button>
+        <button className="hbtn dashed mini" disabled={disabled} onClick={onPlanSections}>🧩 AI 规划分部</button>
       </div>
-      <div className="nav-item settings" onClick={onOpenSettings}>⚙️ API 设置</div>
     </aside>
   );
 }
