@@ -14,8 +14,8 @@ export function Sidebar({ tree, selection, disabled, onSelect, onAddSection, onA
   return (
     <aside className={`sidebar sketch ${disabled ? 'locked' : ''}`}>
       <div className="side-tabs">
-        <div className={`side-tab ${active({ kind: 'outline' })}`} onClick={() => go({ kind: 'outline' })}>📜 全书大纲</div>
-        <div className={`side-tab ${active({ kind: 'core' })}`} onClick={() => go({ kind: 'core' })}>🧭 核心设定</div>
+        <div className={`side-tab ${active({ kind: 'outline' })} ${disabled ? 'disabled' : ''}`} onClick={() => go({ kind: 'outline' })}>📜 全书大纲</div>
+        <div className={`side-tab ${active({ kind: 'core' })} ${disabled ? 'disabled' : ''}`} onClick={() => go({ kind: 'core' })}>🧭 核心设定</div>
       </div>
       {tree.sections.map((s) => (
         <div key={s.id} className="section">
