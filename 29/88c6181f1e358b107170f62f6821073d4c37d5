@@ -1,0 +1,66 @@
+server/test/gen.test.js
+  s_aca8d3601d736b::t_eb0b1713849043 53-75,107-108,143
+  s_aca8d3601d736b::t_946e339d1662ae 145-146
+  s_aca8d3601d736b::t_2715c8ec8ce546 224
+  s_aca8d3601d736b::t_4bd3834ea3a9a4 14-23,95-98,147-185,194-195,199-223
+  s_aca8d3601d736b::t_431ff08165fe12 109-142,144
+web/src/App.tsx
+  s_aca8d3601d736b::t_20de221c45811d 136
+web/src/types.ts
+  s_aca8d3601d736b::t_b7d1538a122d6a 5,7,12,17
+web/src/titles.ts
+  s_aca8d3601d736b::t_6f8933f73db1ff 1-34
+web/src/titles.test.ts
+  s_aca8d3601d736b::t_98f516fd097248 1-22
+server/test/store.test.js
+  s_aca8d3601d736b::t_5d3ab509310412 20
+server/routes/gen.js
+  s_aca8d3601d736b::t_896379ec489b2b 4-5,7,44-67,134-137,143-157,165
+  s_aca8d3601d736b::t_7bd7630e812e0d 164
+server/test/title-migration.test.js
+  s_aca8d3601d736b::t_8680147688793d 1-89
+server/llm.js
+  s_aca8d3601d736b::t_9dca8291c3ba68 50-53,55,57-58,60-64,66-69,78-79
+  s_aca8d3601d736b::t_d8aa46618a0b36 59
+  s_aca8d3601d736b::t_582d2e0d076a4b 54,56
+server/test/llm.test.js
+  s_aca8d3601d736b::t_c749c7007e2089 51-56
+  s_aca8d3601d736b::t_317dce2b5eabde 42-43
+  s_aca8d3601d736b::t_be2f83df327ad4 3,34-41,44-50,57-64
+web/src/components/MainPanel.tsx
+  s_aca8d3601d736b::t_734fdad7bdd1f8 4,57
+server/routes/books.js
+  s_aca8d3601d736b::t_b2977eeab945df 27-30
+server/test/store-tree.test.js
+  s_aca8d3601d736b::t_216c12a16f7a4c 16,18-19,26-28,31-32,34-35
+web/src/components/Sidebar.tsx
+  s_aca8d3601d736b::t_3ac51702db8a22 3,23,29
+server/prompts.js
+  s_aca8d3601d736b::t_1e9d0886fe532d 56-65
+server/store.js
+  s_aca8d3601d736b::t_ed17a8ed968eca 33,35-38,89-115,118,122,124-126,137-139,146,150,152-154,202,211,280
+web/src/api.ts
+  s_aca8d3601d736b::t_c19155b71c35ec 1,21-22
+server/test/store-versioned-io.test.js
+  s_aca8d3601d736b::t_7f2df85ed3277f 21-24,50,55-56
+server/test/prompts.test.js
+  s_aca8d3601d736b::t_503d4ab5ca99ac 32-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2988c6181f1e358b107170f62f6821073d4c37d5",
+  "prompts": {},
+  "sessions": {
+    "s_aca8d3601d736b": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a696dc95dc2f7d7375ffdb3",
+        "model": "gpt-5.5__dev"
+      },
+      "human_author": "yanguifang <yanguifang@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
