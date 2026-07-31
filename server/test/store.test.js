@@ -17,6 +17,7 @@ test('createBook 建书并可读回', async () => {
   assert.deepEqual(book.outline, { versions: [''], cursor: 0 });
   const back = await store.readBook(book.id);
   assert.equal(back.title, '测试书');
+  assert.equal(back.titleSource, 'manual');
 });
 
 test('writeBook 更新 updatedAt', async () => {

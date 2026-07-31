@@ -13,20 +13,26 @@ beforeEach(async () => {
 });
 
 test('addSection 追加进 book.sections', async () => {
-  const s = await store.addSection(bookId, { title: '第一部' });
+  const s = await store.addSection(bookId, { title: '起源' });
   assert.equal(s.index, 1);
+  assert.equal(s.title, '起源');
+  assert.equal(s.titleSource, 'manual');
   assert.match(s.id, /^section-01$/);
   const book = await store.readBook(bookId);
   assert.deepEqual(book.sections, ['section-01']);
 });
 
 test('addChapter 追加进 section.chapters，序号递增', async () => {
-  const s = await store.addSection(bookId, { title: '第一部' });
-  const c1 = await store.addChapter(bookId, s.id, { title: '第一章' });
-  const c2 = await store.addChapter(bookId, s.id, { title: '第二章' });
+  const s = await store.addSection(bookId, { title: '起源' });
+  const c1 = await store.addChapter(bookId, s.id, { title: '初见' });
+  const c2 = await store.addChapter(bookId, s.id, {});
   assert.equal(c1.index, 1);
   assert.equal(c1.status, 'done');
+  assert.equal(c1.title, '初见');
+  assert.equal(c1.titleSource, 'manual');
   assert.match(c1.id, /^chapter-01$/);
+  assert.equal(c2.title, '');
+  assert.equal(c2.titleSource, 'default');
   assert.match(c2.id, /^chapter-02$/);  // 序号递增且两位格式
   const sec = await store.readSection(bookId, s.id);
   assert.deepEqual(sec.chapters, ['chapter-01', 'chapter-02']);

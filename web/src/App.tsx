@@ -133,7 +133,7 @@ export default function App() {
   };
   const adoptSections = async (titles: string[]) => {
     setPlanOpen(false);
-    for (const t of titles) await api.addSection(bookId, t);
+    for (const t of titles) await api.addSection(bookId, t, 'ai');
     await reload(bookId); toast.success(`✓ 已创建 ${titles.length} 个部`);
   };
   const stopGen = () => { abortRef.current?.(); setStreaming(false); setStreamingPath(null); setStatusText(''); };

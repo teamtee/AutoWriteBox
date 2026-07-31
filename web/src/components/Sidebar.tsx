@@ -1,5 +1,6 @@
 import type { BookTree } from '../types';
 import type { Selection } from '../store';
+import { formatIndexedTitle } from '../titles';
 
 export function Sidebar({ tree, selection, disabled, onSelect, onAddSection, onAddChapter, onPlanSections }: {
   tree: BookTree; selection: Selection; disabled: boolean;
@@ -19,13 +20,13 @@ export function Sidebar({ tree, selection, disabled, onSelect, onAddSection, onA
       </div>
       {tree.sections.map((s) => (
         <div key={s.id} className="section">
-          <div className="section-title">{s.title}</div>
+          <div className="section-title">{formatIndexedTitle(s.index, '部', s.title)}</div>
           <div className="chapter-list">
             {s.chapters.map((c) => (
               <div key={c.id}
                 className={`${cls({ kind: 'chapter', sectionId: s.id, chapterId: c.id })} chapter`}
                 onClick={() => go({ kind: 'chapter', sectionId: s.id, chapterId: c.id })}>
-                <span>{c.title}</span>{c.content ? <span className="done">✓</span> : null}
+                <span>{formatIndexedTitle(c.index, '章', c.title)}</span>{c.content ? <span className="done">✓</span> : null}
               </div>
             ))}
           </div>

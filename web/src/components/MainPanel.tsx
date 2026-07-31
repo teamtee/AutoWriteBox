@@ -1,6 +1,7 @@
 import type { BookTree } from '../types';
 import type { Selection } from '../store';
 import { findChapter } from '../store';
+import { formatIndexedTitle } from '../titles';
 import { VersionedBox } from './VersionedBox';
 
 // core 字段元信息
@@ -53,7 +54,7 @@ export function MainPanel({ tree, selection, streaming, streamingText, streaming
   const chStreaming = streaming && streamingPath === 'chapter';
   return (
     <main className="main">
-      <VersionedBox title={chapter.title} versioned={chapter.body} size="lg"
+      <VersionedBox title={formatIndexedTitle(chapter.index, '章', chapter.title)} versioned={chapter.body} size="lg"
         streaming={chStreaming} streamingText={chStreaming ? streamingText : ''}
         onMove={(d) => onMove(path, d)} onRewrite={() => onRewrite(path)}
         onClear={() => onClear(path)} onSave={(t) => onSave(path, t)} onStop={onStop} />

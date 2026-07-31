@@ -30,8 +30,12 @@ export async function createBook({ premise, title }) {
   const ts = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 17);
   const id = 'book_' + ts + '_' + Math.random().toString(36).slice(2, 6);
   const now = new Date().toISOString();
+  const hasExplicitTitle = typeof title === 'string' && title.trim() !== '';
   const book = {
-    id, title: title || (premise ?? '').slice(0, 20), createdAt: now, updatedAt: now,
+    id,
+    title: hasExplicitTitle ? title.trim() : (premise ?? '').slice(0, 20),
+    titleSource: hasExplicitTitle ? 'manual' : 'default',
+    createdAt: now, updatedAt: now,
     premise, outline: emptyOutline(), settings: emptyCore(),
     characters: [], summary: '', progress: '', sections: [],
   };
@@ -82,14 +86,44 @@ export async function listBooks() {
 
 // ——— 序号格式化 ———
 const pad2 = (n) => String(n).padStart(2, '0');
+const TITLE_SOURCES = new Set(['default', 'ai', 'manual']);
+const CN_NUM = '零一二三四五六七八九十百千两';
+
+function normalizeEntityTitle(entity, unit) {
+  if (TITLE_SOURCES.has(entity.titleSource)) return entity;
+  const raw = typeof entity.title === 'string' ? entity.title.trim() : '';
+  const ordinal = `第\\s*(?:\\d+|[${CN_NUM}]+)\\s*${unit}`;
+  const onlyOrdinal = new RegExp(`^${ordinal}$`);
+  const withPrefix = new RegExp(`^${ordinal}\\s*[·:：\\-—]?\\s*(.*)$`);
+  if (!raw || onlyOrdinal.test(raw)) {
+    entity.title = '';
+    entity.titleSource = 'default';
+    return entity;
+  }
+  const m = raw.match(withPrefix);
+  entity.title = (m ? m[1] : raw).trim();
+  entity.titleSource = 'manual';
+  return entity;
+}
+
+function migrateBookTitleInPlace(book) {
+  if (!TITLE_SOURCES.has(book.titleSource)) {
+    const fallback = (book.premise ?? '').slice(0, 20);
+    book.titleSource = book.title === fallback ? 'default' : 'manual';
+  }
+  return book;
+}
 
 // ——— section ———
-export async function addSection(bookId, { title }) {
+export async function addSection(bookId, { title, titleSource } = {}) {
   const book = await readBook(bookId);
   const index = book.sections.length + 1;
   const id = `section-${pad2(index)}`;
+  const cleanTitle = typeof title === 'string' ? title.trim() : '';
   const section = {
-    id, index, title: title || `第 ${index} 部`,
+    id, index,
+    title: cleanTitle,
+    titleSource: cleanTitle ? (TITLE_SOURCES.has(titleSource) ? titleSource : 'manual') : 'default',
     outline: { content: '', history: [] },
     characters: [], summary: '', progress: '', chapters: [],
   };
@@ -100,19 +134,24 @@ export async function addSection(bookId, { title }) {
   return section;
 }
 export async function readSection(bookId, sectionId) {
-  return JSON.parse(await readFile(join(bookDir(bookId), safeId(sectionId), 'section.json'), 'utf8'));
+  const section = JSON.parse(await readFile(
+    join(bookDir(bookId), safeId(sectionId), 'section.json'), 'utf8'));
+  return normalizeEntityTitle(section, '部');
 }
 export async function writeSection(bookId, sectionId, obj) {
   await atomicWriteJson(join(bookDir(bookId), safeId(sectionId), 'section.json'), obj);
 }
 
 // ——— chapter ———
-export async function addChapter(bookId, sectionId, { title }) {
+export async function addChapter(bookId, sectionId, { title } = {}) {
   const section = await readSection(bookId, sectionId);
   const index = section.chapters.length + 1;
   const id = `chapter-${pad2(index)}`;
+  const cleanTitle = typeof title === 'string' ? title.trim() : '';
   const chapter = {
-    id, index, title: title || `第 ${index} 章`,
+    id, index,
+    title: cleanTitle,
+    titleSource: cleanTitle ? 'manual' : 'default',
     body: emptyVersioned(), content: '',
     characters: [], summary: '', progress: '', status: 'done',
   };
@@ -160,6 +199,7 @@ export function migrateVersioned(old) {
 }
 // ——— 惰性迁移辅助（读盘时把老结构就地升级为新结构）———
 function migrateBookInPlace(book) {
+  migrateBookTitleInPlace(book);
   book.outline = migrateVersioned(book.outline);
   book.settings = book.settings || { core: {}, history: [] };
   const core = book.settings.core || {};
@@ -168,6 +208,7 @@ function migrateBookInPlace(book) {
   return book;
 }
 function migrateChapterInPlace(ch) {
+  normalizeEntityTitle(ch, '章');
   if (!ch.body || !Array.isArray(ch.body.versions)) {
     ch.body = migrateVersioned({ content: ch.content, history: ch.history });
   }
@@ -236,6 +277,7 @@ export async function deleteBook(id) {
 export async function renameBook(id, title) {
   const book = await readBook(id);
   book.title = title || book.title;
+  book.titleSource = 'manual';
   await writeBook(id, book);
   return book;
 }

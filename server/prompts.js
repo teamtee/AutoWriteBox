@@ -53,8 +53,16 @@ export function buildSectionsInstruction(outline) {
 
 export const DIGEST_INSTRUCTION =
   '请阅读上文这一章正文，返回严格的 JSON（不要多余文字），格式：' +
-  '{"summary":"本章50字内小结","progress":"下一步剧情走向","newCharacters":[{"name":"名","role":"身份","desc":"简述"}]}。' +
-  '若无新登场人物，newCharacters 为空数组。';
+  '{"chapterTitle":"本章10字内纯标题，不带第N章",' +
+  '"sectionTitle":"本部10字内纯标题，不带第N部",' +
+  '"summary":"本章50字内小结","progress":"下一步剧情走向",' +
+  '"newCharacters":[{"name":"名","role":"身份","desc":"简述"}]}。' +
+  '标题不要书名号、引号、序号或解释；若无新登场人物，newCharacters 为空数组。';
+
+export function buildBookTitleInstruction(premise, outline) {
+  return `故事设想：${premise || ''}\n全书大纲：${outline || ''}\n` +
+    '请拟一个10字以内、有文学性的纯书名。不要书名号、引号、序号、冒号或解释，只输出书名。';
+}
 
 export function buildCoreFieldInstruction(field, book) {
   const names = { world: '世界观', style: '文风基调', constraints: '禁忌约束', pacing: '篇幅节奏' };

@@ -24,7 +24,10 @@ export function mountBookRoutes(app) {
   });
 
   app.post('/api/books/:id/sections', async (req, res) => {
-    res.json(await store.addSection(req.params.id, { title: req.body?.title }));
+    res.json(await store.addSection(req.params.id, {
+      title: req.body?.title,
+      titleSource: req.body?.titleSource,
+    }));
   });
 
   app.post('/api/books/:id/sections/:sid/chapters', async (req, res) => {

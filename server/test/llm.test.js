@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSSEChunk, extractDigest } from '../llm.js';
+import { parseSSEChunk, extractDigest, sanitizeGeneratedTitle } from '../llm.js';
 
 test('parseSSEChunk 抽取 delta 并保留残尾', () => {
   const buf =
@@ -31,5 +31,35 @@ test('extractDigest 从夹带文字中截取', () => {
 
 test('extractDigest 无法解析时返回空结构', () => {
   const d = extractDigest('抱歉我不会');
-  assert.deepEqual(d, { summary: '', progress: '', newCharacters: [] });
+  assert.deepEqual(d, {
+    chapterTitle: '', sectionTitle: '',
+    summary: '', progress: '', newCharacters: [],
+  });
+});
+
+test('sanitizeGeneratedTitle 清理格式并截断到 10 字', () => {
+  assert.equal(sanitizeGeneratedTitle('《雾城来客》'), '雾城来客');
+  assert.equal(sanitizeGeneratedTitle('书名：第一章 · 夜雨来客'), '夜雨来客');
+  assert.equal(sanitizeGeneratedTitle('书名：第一部：暗潮初现'), '暗潮初现');
+  assert.equal(sanitizeGeneratedTitle('章名：第十二章 · 夜雨来客', '章'), '夜雨来客');
+  assert.equal(sanitizeGeneratedTitle('部名：第一部：暗潮初现', '部'), '暗潮初现');
+  assert.equal(sanitizeGeneratedTitle('第一行标题\n第二行解释'), '第一行标题');
+  assert.equal(sanitizeGeneratedTitle('一二三四五六七八九十十一'), '一二三四五六七八九十');
+  assert.equal(sanitizeGeneratedTitle('《》'), '');
+});
+
+test('sanitizeGeneratedTitle 清理通用序号前缀', () => {
+  assert.equal(sanitizeGeneratedTitle('1. 雾城来客'), '雾城来客');
+  assert.equal(sanitizeGeneratedTitle('一、雾城来客'), '雾城来客');
+  assert.equal(sanitizeGeneratedTitle('（1）雾城来客'), '雾城来客');
+});
+
+test('extractDigest 解析并清洗章名部名', () => {
+  const d = extractDigest(JSON.stringify({
+    chapterTitle: '第3章 · 夜雨来客',
+    sectionTitle: '第二部：暗潮初现',
+    summary: 'S', progress: 'P', newCharacters: [],
+  }));
+  assert.equal(d.chapterTitle, '夜雨来客');
+  assert.equal(d.sectionTitle, '暗潮初现');
 });

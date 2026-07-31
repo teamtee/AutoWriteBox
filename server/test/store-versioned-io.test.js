@@ -18,6 +18,10 @@ test('addChapter 带 body + 派生 content', async () => {
   const b = await store.createBook({ premise: 'p' });
   const s = await store.addSection(b.id, {});
   const c = await store.addChapter(b.id, s.id, {});
+  assert.equal(s.title, '');
+  assert.equal(s.titleSource, 'default');
+  assert.equal(c.title, '');
+  assert.equal(c.titleSource, 'default');
   assert.deepEqual(c.body, { versions: [''], cursor: 0 });
   assert.equal(c.content, '');
 });
@@ -43,11 +47,13 @@ test('readChapter 惰性迁移 + 派生 content', async () => {
   // 手写老格式章节
   const cid = 'chapter-01';
   writeFileSync(join(root, 'books', b.id, s.id, `${cid}.json`), JSON.stringify({
-    id: cid, index: 1, title: '第一章', content: '正文当前', history: ['正文旧'],
+    id: cid, index: 1, title: '初见', content: '正文当前', history: ['正文旧'],
     characters: [], summary: '', progress: '', status: 'done',
   }), 'utf8');
   const sec = await store.readSection(b.id, s.id); sec.chapters.push(cid); await store.writeSection(b.id, s.id, sec);
   const ch = await store.readChapter(b.id, s.id, cid);
+  assert.equal(ch.title, '初见');
+  assert.equal(ch.titleSource, 'manual');
   assert.deepEqual(ch.body, { versions: ['正文旧', '正文当前'], cursor: 1 });
   assert.equal(ch.content, '正文当前');
 });

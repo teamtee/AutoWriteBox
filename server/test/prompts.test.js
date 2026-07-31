@@ -29,10 +29,19 @@ test('buildChapterInstruction 抽打时嵌入训话且优先', () => {
   assert.match(i, /2000/);
 });
 
-test('DIGEST_INSTRUCTION 要求 JSON 三字段', () => {
-  assert.match(p.DIGEST_INSTRUCTION, /summary/);
-  assert.match(p.DIGEST_INSTRUCTION, /progress/);
-  assert.match(p.DIGEST_INSTRUCTION, /newCharacters/);
+test('DIGEST_INSTRUCTION 要求标题与原有 digest 五字段', () => {
+  for (const field of ['chapterTitle', 'sectionTitle', 'summary', 'progress', 'newCharacters']) {
+    assert.match(p.DIGEST_INSTRUCTION, new RegExp(field));
+  }
+  assert.match(p.DIGEST_INSTRUCTION, /10\s*字/);
+});
+
+test('buildBookTitleInstruction 带 premise、大纲和纯标题限制', () => {
+  const s = p.buildBookTitleInstruction('赛博侦探', '主角追查意识失踪案');
+  assert.match(s, /赛博侦探/);
+  assert.match(s, /意识失踪案/);
+  assert.match(s, /10\s*字/);
+  assert.match(s, /只输出书名/);
 });
 
 test('buildSystemPrompt 兼容版本化 core', () => {

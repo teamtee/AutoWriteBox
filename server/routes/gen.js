@@ -1,9 +1,10 @@
 import * as store from '../store.js';
 import {
   buildSystemPrompt, buildContext, buildChapterInstruction,
-  buildOutlineInstruction, buildSectionsInstruction, buildCoreFieldInstruction, DIGEST_INSTRUCTION,
+  buildOutlineInstruction, buildSectionsInstruction, buildCoreFieldInstruction,
+  buildBookTitleInstruction, DIGEST_INSTRUCTION,
 } from '../prompts.js';
-import { extractDigest as defaultExtract } from '../llm.js';
+import { extractDigest as defaultExtract, sanitizeGeneratedTitle } from '../llm.js';
 
 function sseInit(res) {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -40,6 +41,30 @@ export function mountGenRoutes(app, deps = {}) {
         : buildCoreFieldInstruction(p.field, book);
       const full = await streamInto(res, { config, system, instruction });
       const vf = await store.versionSet(req.params.id, path, full);
+      if (p.type === 'outline') {
+        try {
+          const freshBook = await store.readBook(req.params.id);
+          if (freshBook.titleSource === 'default') {
+            const rawTitle = await nonStreamChat({
+              config,
+              system,
+              messages: [{
+                role: 'user',
+                content: buildBookTitleInstruction(freshBook.premise, full),
+              }],
+            });
+            const title = sanitizeGeneratedTitle(rawTitle);
+            if (title) {
+              const latest = await store.readBook(req.params.id);
+              if (latest.titleSource === 'default') {
+                latest.title = title;
+                latest.titleSource = 'ai';
+                await store.writeBook(latest.id, latest);
+              }
+            }
+          }
+        } catch { /* 书名失败不影响大纲 */ }
+      }
       send(res, { done: true, versions: vf.versions, cursor: vf.cursor });
     } catch (e) { send(res, { error: String(e.message || e) }); }
     res.end();
@@ -106,19 +131,38 @@ export function mountGenRoutes(app, deps = {}) {
         });
         const d = extractDigest(digestText);
         // 仅当 digest 解析出有效值时才更新，避免空值覆盖已有 summary/progress（断片保护）
+        if (d.chapterTitle && chapter.titleSource === 'default') {
+          chapter.title = d.chapterTitle;
+          chapter.titleSource = 'ai';
+        }
         if (d.summary) chapter.summary = d.summary;
         if (d.progress) chapter.progress = d.progress;
         if (d.newCharacters.length) chapter.characters.push(...d.newCharacters);
-        await store.writeChapter(bookId, sectionId, chapterId, chapter);
         // 冒泡
         const sec = await store.readSection(bookId, sectionId);
+        if (d.sectionTitle && sec.titleSource === 'default') {
+          let hasOtherCompleted = false;
+          for (const cid of sec.chapters) {
+            if (cid === chapterId) continue;
+            const other = await store.readChapter(bookId, sectionId, cid);
+            if (store.currentText(other.body).trim()) {
+              hasOtherCompleted = true;
+              break;
+            }
+          }
+          if (!hasOtherCompleted) {
+            sec.title = d.sectionTitle;
+            sec.titleSource = 'ai';
+          }
+        }
         if (d.summary) sec.summary = (sec.summary ? sec.summary + '\n' : '') + `第${chapter.index}章：${d.summary}`;
         if (d.progress) sec.progress = d.progress;
         await store.writeSection(bookId, sectionId, sec);
         const bk = await store.readBook(bookId);
         if (d.progress) bk.progress = d.progress;
         await store.writeBook(bookId, bk);
-      } catch { /* digest 失败，正文已保存，跳过 */ }
+      } catch { /* digest 失败不影响正文保存 */ }
+      await store.writeChapter(bookId, sectionId, chapterId, chapter);
 
       send(res, { done: true, chapterId });
     } catch (e) {

@@ -11,8 +11,16 @@ import { mountGenRoutes } from '../routes/gen.js';
 // 假 llm：章节正文固定，digest 返回合法 JSON
 const fakeDeps = {
   async *streamChat() { yield '这是'; yield '正文'; },
-  async nonStreamChat() {
-    return '{"summary":"小结A","progress":"下一步B","newCharacters":[{"name":"龙套甲","role":"路人","desc":"x"}]}';
+  async nonStreamChat({ messages }) {
+    const prompt = messages?.[0]?.content ?? '';
+    if (prompt.includes('只输出书名')) return '《雾城追凶》';
+    return JSON.stringify({
+      chapterTitle: '第1章 · 夜雨来客',
+      sectionTitle: '第一部：暗潮初现',
+      summary: '小结A',
+      progress: '下一步B',
+      newCharacters: [{ name: '龙套甲', role: '路人', desc: 'x' }],
+    });
   },
 };
 
@@ -42,6 +50,29 @@ async function readSSE(res) {
   return out;
 }
 
+async function readUntilText(res, expected) {
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let out = '';
+  while (!out.includes(expected)) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    out += dec.decode(value);
+  }
+  return { reader, out };
+}
+
+async function readRest(reader) {
+  const dec = new TextDecoder();
+  let out = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    out += dec.decode(value);
+  }
+  return out;
+}
+
 // gen/chapter 正文写入 chapter.body（版本化），content 由 writeChapter 从 body 派生
 test('gen/chapter next 生成正文并落盘 + digest 冒泡', async () => {
   await withServer(async () => {
@@ -61,11 +92,94 @@ test('gen/chapter next 生成正文并落盘 + digest 冒泡', async () => {
     assert.equal(ch.content, '这是正文');
     assert.equal(ch.summary, '小结A');
     assert.equal(ch.progress, '下一步B');
+    assert.equal(ch.title, '夜雨来客');
+    assert.equal(ch.titleSource, 'ai');
+    assert.equal(sec.title, '暗潮初现');
+    assert.equal(sec.titleSource, 'ai');
     assert.equal(ch.characters[0].name, '龙套甲');
     // 冒泡
     assert.match(sec.progress, /下一步B/);
     const bk = await store.readBook(book.id);
     assert.match(bk.progress, /下一步B/);
+  });
+});
+
+test('gen/chapter 在 digest 返回前已落盘正文', async () => {
+  let releaseDigest;
+  let digestStartedResolve;
+  const digestStarted = new Promise((resolve) => { digestStartedResolve = resolve; });
+  const digestResult = new Promise((resolve) => { releaseDigest = resolve; });
+  const hangingDigestDeps = {
+    async *streamChat() { yield '这是'; yield '正文'; },
+    async nonStreamChat() {
+      digestStartedResolve();
+      return digestResult;
+    },
+  };
+
+  await withServer(async () => {
+    const book = await store.createBook({ premise: 'p' });
+    const s = await store.addSection(book.id, {});
+    const res = await post('/api/gen/chapter', { bookId: book.id, sectionId: s.id, mode: 'next' });
+    const { reader, out } = await readUntilText(res, '正文');
+    assert.match(out, /正文/);
+    await digestStarted;
+
+    try {
+      const sec = await store.readSection(book.id, s.id);
+      assert.equal(sec.chapters.length, 1);
+      const ch = await store.readChapter(book.id, s.id, sec.chapters[0]);
+      assert.equal(store.currentText(ch.body), '这是正文');
+      assert.equal(ch.content, '这是正文');
+    } finally {
+      releaseDigest(JSON.stringify({
+        chapterTitle: '夜雨来客',
+        sectionTitle: '暗潮初现',
+        summary: '小结A',
+        progress: '下一步B',
+        newCharacters: [],
+      }));
+      await readRest(reader);
+    }
+  }, hangingDigestDeps);
+});
+
+test('非首个完成章节不改部名，manual 标题不被覆盖', async () => {
+  await withServer(async () => {
+    const book = await store.createBook({ premise: 'p' });
+    const s = await store.addSection(book.id, { title: '人工部名', titleSource: 'manual' });
+    const c = await store.addChapter(book.id, s.id, { title: '人工章名' });
+
+    const res = await post('/api/gen/chapter', {
+      bookId: book.id, sectionId: s.id, chapterId: c.id, mode: 'rewrite',
+    });
+    await readSSE(res);
+
+    const section = await store.readSection(book.id, s.id);
+    const chapter = await store.readChapter(book.id, s.id, c.id);
+    assert.equal(section.title, '人工部名');
+    assert.equal(section.titleSource, 'manual');
+    assert.equal(chapter.title, '人工章名');
+    assert.equal(chapter.titleSource, 'manual');
+  });
+});
+
+test('已有完成章节时不再为默认部名自动命名', async () => {
+  await withServer(async () => {
+    const book = await store.createBook({ premise: 'p' });
+    const s = await store.addSection(book.id, {});
+    const first = await store.addChapter(book.id, s.id, {});
+    first.body = { versions: ['已有正文'], cursor: 0 };
+    await store.writeChapter(book.id, s.id, first.id, first);
+    const second = await store.addChapter(book.id, s.id, {});
+
+    const res = await post('/api/gen/chapter', {
+      bookId: book.id, sectionId: s.id, chapterId: second.id, mode: 'rewrite',
+    });
+    await readSSE(res);
+    const section = await store.readSection(book.id, s.id);
+    assert.equal(section.title, '');
+    assert.equal(section.titleSource, 'default');
   });
 });
 
@@ -77,7 +191,35 @@ test('version/rewrite path=outline 流式生成后写入 book.outline（版本�
     assert.match(sse, /"done":true/);
     const bk = await store.readBook(book.id);
     assert.equal(store.currentText(bk.outline), '这是正文');
+    assert.equal(bk.title, '雾城追凶');
+    assert.equal(bk.titleSource, 'ai');
   });
+});
+
+test('manual 书名不被大纲生成覆盖', async () => {
+  await withServer(async () => {
+    const book = await store.createBook({ premise: 'p', title: '人工书名' });
+    const res = await post(`/api/books/${book.id}/version/rewrite`, { path: 'outline' });
+    await readSSE(res);
+    const bk = await store.readBook(book.id);
+    assert.equal(bk.title, '人工书名');
+    assert.equal(bk.titleSource, 'manual');
+  });
+});
+
+test('书名生成失败不影响大纲完成', async () => {
+  const deps = {
+    async *streamChat() { yield '新大纲'; },
+    async nonStreamChat() { throw new Error('TITLE_FAIL'); },
+  };
+  await withServer(async () => {
+    const book = await store.createBook({ premise: 'p' });
+    const res = await post(`/api/books/${book.id}/version/rewrite`, { path: 'outline' });
+    const sse = await readSSE(res);
+    assert.match(sse, /"done":true/);
+    assert.doesNotMatch(sse, /"error"/);
+    assert.equal(store.currentText((await store.readBook(book.id)).outline), '新大纲');
+  }, deps);
 });
 
 test('version/rewrite path=core:world 写入 settings.core.world（版本化）', async () => {

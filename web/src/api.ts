@@ -1,4 +1,4 @@
-import type { Book, BookTree, BookSummary, Config } from './types';
+import type { Book, BookTree, BookSummary, Config, TitleSource } from './types';
 
 // 统一解析：非 2xx 抛错（含后端 {error} 文案），避免把 404 HTML 灌进 JSON.parse 后静默失败
 const json = async (r: Response) => {
@@ -18,7 +18,8 @@ export const saveConfig = (patch: Partial<Config>): Promise<Config> => jpost('/a
 export const listBooks = (): Promise<BookSummary[]> => fetch('/api/books').then(json);
 export const createBook = (premise: string, title?: string): Promise<Book> => jpost('/api/books', { premise, title });
 export const getTree = (bookId: string): Promise<BookTree> => fetch(`/api/books/${bookId}/tree`).then(json);
-export const addSection = (bookId: string, title?: string) => jpost(`/api/books/${bookId}/sections`, { title });
+export const addSection = (bookId: string, title?: string, titleSource?: TitleSource) =>
+  jpost(`/api/books/${bookId}/sections`, { title, titleSource });
 export const addChapter = (bookId: string, sid: string, title?: string) => jpost(`/api/books/${bookId}/sections/${sid}/chapters`, { title });
 
 // 书架管理
