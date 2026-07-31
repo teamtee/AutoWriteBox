@@ -89,8 +89,17 @@ const pad2 = (n) => String(n).padStart(2, '0');
 const TITLE_SOURCES = new Set(['default', 'ai', 'manual']);
 const CN_NUM = '零一二三四五六七八九十百千两';
 
+function stripGeneratedTitleDescription(title) {
+  const raw = typeof title === 'string' ? title.trim() : '';
+  const pure = raw.split(/[:：]/, 1)[0].trim();
+  return pure || raw;
+}
+
 function normalizeEntityTitle(entity, unit) {
-  if (TITLE_SOURCES.has(entity.titleSource)) return entity;
+  if (TITLE_SOURCES.has(entity.titleSource)) {
+    if (entity.titleSource === 'ai') entity.title = stripGeneratedTitleDescription(entity.title);
+    return entity;
+  }
   const raw = typeof entity.title === 'string' ? entity.title.trim() : '';
   const ordinal = `第\\s*(?:\\d+|[${CN_NUM}]+)\\s*${unit}`;
   const onlyOrdinal = new RegExp(`^${ordinal}$`);
@@ -120,10 +129,11 @@ export async function addSection(bookId, { title, titleSource } = {}) {
   const index = book.sections.length + 1;
   const id = `section-${pad2(index)}`;
   const cleanTitle = typeof title === 'string' ? title.trim() : '';
+  const source = cleanTitle ? (TITLE_SOURCES.has(titleSource) ? titleSource : 'manual') : 'default';
   const section = {
     id, index,
-    title: cleanTitle,
-    titleSource: cleanTitle ? (TITLE_SOURCES.has(titleSource) ? titleSource : 'manual') : 'default',
+    title: source === 'ai' ? stripGeneratedTitleDescription(cleanTitle) : cleanTitle,
+    titleSource: source,
     outline: { content: '', history: [] },
     characters: [], summary: '', progress: '', chapters: [],
   };

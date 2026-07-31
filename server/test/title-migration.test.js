@@ -87,3 +87,20 @@ test('renameBook 标记 manual', async () => {
   assert.equal(renamed.title, '人工书名');
   assert.equal(renamed.titleSource, 'manual');
 });
+
+test('AI 分部旧标题剥离剧情走向，只保留纯标题', async () => {
+  const b = await store.createBook({ premise: 'p' });
+  const bookDir = join(root, 'books', b.id);
+  mkdirSync(join(bookDir, 'section-01'), { recursive: true });
+  writeFileSync(join(bookDir, 'section-01', 'section.json'), JSON.stringify({
+    id: 'section-01', index: 1,
+    title: '深渊低语：林深在雨城获得第一条线索',
+    titleSource: 'ai',
+    outline: { content: '', history: [] }, characters: [], summary: '', progress: '',
+    chapters: [],
+  }));
+
+  const s = await store.readSection(b.id, 'section-01');
+  assert.equal(s.title, '深渊低语');
+  assert.equal(s.titleSource, 'ai');
+});

@@ -20,4 +20,15 @@ describe('parseSectionTitles', () => {
   it('全无匹配返回空数组', () => {
     expect(parseSectionTitles('毫无结构的一段话')).toEqual([]);
   });
+  it('解析中文数字「第X部 · 标题」', () => {
+    const t = '第一部 · 深渊低语\n第二部 · 暗潮初现\n第十三部 · 意识风暴';
+    expect(parseSectionTitles(t)).toEqual(['深渊低语', '暗潮初现', '意识风暴']);
+  });
+  it('中文数字无标题时兜底', () => {
+    expect(parseSectionTitles('第一部\n第二部')).toEqual(['第一部', '第二部']);
+  });
+  it('只采纳冒号前的纯标题，丢弃剧情走向', () => {
+    const t = '第一部 · 深渊低语：林深在雨城获得第一条线索\n第 2 部 · 意识风暴：深渊网络全面失控';
+    expect(parseSectionTitles(t)).toEqual(['深渊低语', '意识风暴']);
+  });
 });
