@@ -23,6 +23,31 @@ test('buildContext 按作用域拼装人物', () => {
   assert.match(ctx, /本部前情Z/);
 });
 
+test('buildContext 忽略旧数据里的非法人物结构', () => {
+  const ctx = p.buildContext({
+    book: {
+      characters: { bad: 'object' },
+    },
+    section: {
+      characters: [
+        null,
+        'bad',
+        { name: '缺身份' },
+        { name: '林薇', role: '委托人', desc: '神秘' },
+      ],
+    },
+    prevChapter: {
+      characters: [42, { name: '老鼠', role: '线人', desc: '贩子' }],
+    },
+  });
+
+  assert.match(ctx, /林薇/);
+  assert.match(ctx, /老鼠/);
+  assert.doesNotMatch(ctx, /undefined/);
+  assert.doesNotMatch(ctx, /bad/);
+  assert.doesNotMatch(ctx, /缺身份/);
+});
+
 test('buildChapterInstruction 抽打时嵌入训话且优先', () => {
   const i = p.buildChapterInstruction({ chapterIndex: 3, wordTarget: 2000, mode: 'whip', whip: '太平淡，加冲突' });
   assert.match(i, /太平淡，加冲突/);

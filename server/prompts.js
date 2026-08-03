@@ -18,7 +18,17 @@ export function buildSystemPrompt(core = {}) {
 }
 
 export function buildContext({ book = {}, section = {}, prevChapter = null }) {
-  const chars = (arr) => (arr || []).map((c) => `- ${c.name}（${c.role}）：${c.desc}`).join('\n');
+  const chars = (arr) => {
+    if (!Array.isArray(arr)) return '';
+    return arr
+      .filter((c) =>
+        c &&
+        typeof c.name === 'string' &&
+        typeof c.role === 'string' &&
+        typeof c.desc === 'string')
+      .map((c) => `- ${c.name}（${c.role}）：${c.desc}`)
+      .join('\n');
+  };
   let s = '';
   s += line('全书大纲', vtext(book.outline));
   s += line('本部大纲', section.outline?.content);
