@@ -2,7 +2,11 @@ import { mkdir, readFile, writeFile, rename, readdir, rm } from 'node:fs/promise
 import { join } from 'node:path';
 
 let DATA_ROOT = join(process.cwd(), 'data');
-export function setDataRoot(p) { DATA_ROOT = p; }
+const storeLocks = new Map();
+export function setDataRoot(p) {
+  DATA_ROOT = p;
+  storeLocks.clear();
+}
 const booksDir = () => join(DATA_ROOT, 'books');
 // 白名单校验：防止 '../' 之类路径遍历。合法 id 只允许字母/数字/下划线/连字符
 export function safeId(id) {
@@ -10,6 +14,21 @@ export function safeId(id) {
   return id;
 }
 const bookDir = (id) => join(booksDir(), safeId(id));
+
+async function withStoreLock(key, fn) {
+  const previous = storeLocks.get(key) || Promise.resolve();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const current = previous.catch(() => {}).then(() => gate);
+  storeLocks.set(key, current);
+  await previous.catch(() => {});
+  try {
+    return await fn();
+  } finally {
+    release();
+    if (storeLocks.get(key) === current) storeLocks.delete(key);
+  }
+}
 
 export async function atomicWriteJson(absPath, obj) {
   const tmp = absPath + '.tmp';
@@ -132,23 +151,26 @@ function migrateBookTitleInPlace(book) {
 
 // ——— section ———
 export async function addSection(bookId, { title, titleSource } = {}) {
-  const book = await readBook(bookId);
-  const index = book.sections.length + 1;
-  const id = `section-${pad2(index)}`;
-  const cleanTitle = typeof title === 'string' ? title.trim() : '';
-  const source = cleanTitle ? (TITLE_SOURCES.has(titleSource) ? titleSource : 'manual') : 'default';
-  const section = {
-    id, index,
-    title: source === 'ai' ? stripGeneratedTitleDescription(cleanTitle) : cleanTitle,
-    titleSource: source,
-    outline: { content: '', history: [] },
-    characters: [], summary: '', progress: '', chapters: [],
-  };
-  await mkdir(join(bookDir(bookId), id), { recursive: true });
-  await atomicWriteJson(join(bookDir(bookId), id, 'section.json'), section);
-  book.sections.push(id);
-  await writeBook(bookId, book);
-  return section;
+  const safeBookId = safeId(bookId);
+  return withStoreLock(`book:${safeBookId}:sections`, async () => {
+    const book = await readBook(safeBookId);
+    const index = book.sections.length + 1;
+    const id = `section-${pad2(index)}`;
+    const cleanTitle = typeof title === 'string' ? title.trim() : '';
+    const source = cleanTitle ? (TITLE_SOURCES.has(titleSource) ? titleSource : 'manual') : 'default';
+    const section = {
+      id, index,
+      title: source === 'ai' ? stripGeneratedTitleDescription(cleanTitle) : cleanTitle,
+      titleSource: source,
+      outline: { content: '', history: [] },
+      characters: [], summary: '', progress: '', chapters: [],
+    };
+    await mkdir(join(bookDir(safeBookId), id), { recursive: true });
+    await atomicWriteJson(join(bookDir(safeBookId), id, 'section.json'), section);
+    book.sections.push(id);
+    await writeBook(safeBookId, book);
+    return section;
+  });
 }
 export async function readSection(bookId, sectionId) {
   const section = JSON.parse(await readFile(
@@ -162,21 +184,25 @@ export async function writeSection(bookId, sectionId, obj) {
 
 // ——— chapter ———
 export async function addChapter(bookId, sectionId, { title } = {}) {
-  const section = await readSection(bookId, sectionId);
-  const index = section.chapters.length + 1;
-  const id = `chapter-${pad2(index)}`;
-  const cleanTitle = typeof title === 'string' ? title.trim() : '';
-  const chapter = {
-    id, index,
-    title: cleanTitle,
-    titleSource: cleanTitle ? 'manual' : 'default',
-    body: emptyVersioned(), content: '',
-    characters: [], summary: '', progress: '', status: 'done',
-  };
-  await atomicWriteJson(join(bookDir(bookId), sectionId, `${id}.json`), chapter);
-  section.chapters.push(id);
-  await writeSection(bookId, sectionId, section);
-  return chapter;
+  const safeBookId = safeId(bookId);
+  const safeSectionId = safeId(sectionId);
+  return withStoreLock(`book:${safeBookId}:section:${safeSectionId}:chapters`, async () => {
+    const section = await readSection(safeBookId, safeSectionId);
+    const index = section.chapters.length + 1;
+    const id = `chapter-${pad2(index)}`;
+    const cleanTitle = typeof title === 'string' ? title.trim() : '';
+    const chapter = {
+      id, index,
+      title: cleanTitle,
+      titleSource: cleanTitle ? 'manual' : 'default',
+      body: emptyVersioned(), content: '',
+      characters: [], summary: '', progress: '', status: 'done',
+    };
+    await atomicWriteJson(join(bookDir(safeBookId), safeSectionId, `${id}.json`), chapter);
+    section.chapters.push(id);
+    await writeSection(safeBookId, safeSectionId, section);
+    return chapter;
+  });
 }
 export async function readChapter(bookId, sectionId, chapterId) {
   const ch = JSON.parse(await readFile(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), 'utf8'));

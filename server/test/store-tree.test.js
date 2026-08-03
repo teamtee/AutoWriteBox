@@ -22,6 +22,32 @@ test('addSection 追加进 book.sections', async () => {
   assert.deepEqual(book.sections, ['section-01']);
 });
 
+test('并发 addSection 仍生成连续且不重复的部 id', async () => {
+  const sections = await Promise.all([
+    store.addSection(bookId, { title: '一' }),
+    store.addSection(bookId, { title: '二' }),
+    store.addSection(bookId, { title: '三' }),
+    store.addSection(bookId, { title: '四' }),
+    store.addSection(bookId, { title: '五' }),
+  ]);
+
+  assert.deepEqual(sections.map((s) => s.id), [
+    'section-01',
+    'section-02',
+    'section-03',
+    'section-04',
+    'section-05',
+  ]);
+  const book = await store.readBook(bookId);
+  assert.deepEqual(book.sections, [
+    'section-01',
+    'section-02',
+    'section-03',
+    'section-04',
+    'section-05',
+  ]);
+});
+
 test('addChapter 追加进 section.chapters，序号递增', async () => {
   const s = await store.addSection(bookId, { title: '起源' });
   const c1 = await store.addChapter(bookId, s.id, { title: '初见' });
@@ -36,6 +62,33 @@ test('addChapter 追加进 section.chapters，序号递增', async () => {
   assert.match(c2.id, /^chapter-02$/);  // 序号递增且两位格式
   const sec = await store.readSection(bookId, s.id);
   assert.deepEqual(sec.chapters, ['chapter-01', 'chapter-02']);
+});
+
+test('并发 addChapter 仍生成连续且不重复的章 id', async () => {
+  const s = await store.addSection(bookId, { title: '起源' });
+  const chapters = await Promise.all([
+    store.addChapter(bookId, s.id, { title: '一' }),
+    store.addChapter(bookId, s.id, { title: '二' }),
+    store.addChapter(bookId, s.id, { title: '三' }),
+    store.addChapter(bookId, s.id, { title: '四' }),
+    store.addChapter(bookId, s.id, { title: '五' }),
+  ]);
+
+  assert.deepEqual(chapters.map((c) => c.id), [
+    'chapter-01',
+    'chapter-02',
+    'chapter-03',
+    'chapter-04',
+    'chapter-05',
+  ]);
+  const sec = await store.readSection(bookId, s.id);
+  assert.deepEqual(sec.chapters, [
+    'chapter-01',
+    'chapter-02',
+    'chapter-03',
+    'chapter-04',
+    'chapter-05',
+  ]);
 });
 
 test('pushHistory（覆盖前存档）与 rollback 还原正文', () => {
