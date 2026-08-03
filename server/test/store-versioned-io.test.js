@@ -77,6 +77,18 @@ test('deleteBook / renameBook', async () => {
   await assert.rejects(() => store.readBook(b.id), /BOOK_NOT_FOUND/);
 });
 
+test('deleteBook 与并发 addSection 时删除不被旧写入复活', async () => {
+  const b = await store.createBook({ premise: 'p' });
+
+  await Promise.allSettled([
+    store.deleteBook(b.id),
+    ...Array.from({ length: 20 }, (_, i) =>
+      store.addSection(b.id, { title: `第${i + 1}部` })),
+  ]);
+
+  await assert.rejects(() => store.readBook(b.id), /BOOK_NOT_FOUND/);
+});
+
 test('versionSet + versionMove 往返（outline）', async () => {
   const b = await store.createBook({ premise: 'p' });
   await store.versionSet(b.id, 'outline', '第一版');

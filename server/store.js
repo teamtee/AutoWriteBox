@@ -393,7 +393,9 @@ export async function writeConfig(patch) {
 // ——— 书架管理 ———
 export async function deleteBook(id) {
   // 递归删除整个书目录（幂等）；safeId 校验发生在 bookDir 里
-  await rm(bookDir(id), { recursive: true, force: true });
+  const safeBookId = safeId(id);
+  return withStoreLock(bookJsonLockKey(safeBookId), () =>
+    rm(bookDir(safeBookId), { recursive: true, force: true }));
 }
 export async function renameBook(id, title) {
   const safeBookId = safeId(id);
