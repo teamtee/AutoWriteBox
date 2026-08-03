@@ -413,6 +413,81 @@ test('version/rewrite path=outline 流式生成后写入 book.outline（版本�
   });
 });
 
+test('version/rewrite outline 自动书名阶段客户端停止后不继续写入书名', async () => {
+  let titleStartedResolve;
+  let releaseTitle;
+  let titleFinishedResolve;
+  const titleStarted = new Promise((resolve) => { titleStartedResolve = resolve; });
+  const titleCanReturn = new Promise((resolve) => { releaseTitle = resolve; });
+  const titleFinished = new Promise((resolve) => { titleFinishedResolve = resolve; });
+  const titleDeps = {
+    async *streamChat() { yield '新'; yield '大纲'; },
+    async nonStreamChat() {
+      titleStartedResolve();
+      await titleCanReturn;
+      titleFinishedResolve();
+      return '《雾城追凶》';
+    },
+  };
+
+  await withServer(async () => {
+    const book = await store.createBook({ premise: '写侦探故事' });
+    const ctrl = new AbortController();
+    const res = await fetch(`${base}/api/books/${book.id}/version/rewrite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'outline' }),
+      signal: ctrl.signal,
+    });
+    await readUntilText(res, '大纲');
+    await titleStarted;
+
+    ctrl.abort();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseTitle();
+    await titleFinished;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const bk = await store.readBook(book.id);
+    assert.equal(store.currentText(bk.outline), '新大纲');
+    assert.equal(bk.title, '写侦探故事');
+    assert.equal(bk.titleSource, 'default');
+  }, titleDeps);
+});
+
+test('version/rewrite outline 自动书名清洗后客户端停止不继续写入书名', async () => {
+  let ctrl;
+  const titleDeps = {
+    async *streamChat() { yield '新'; yield '大纲'; },
+    async nonStreamChat() {
+      return {
+        toString() {
+          ctrl.abort();
+          return '《雾城追凶》';
+        },
+      };
+    },
+  };
+
+  await withServer(async () => {
+    const book = await store.createBook({ premise: '写侦探故事' });
+    ctrl = new AbortController();
+    const res = await fetch(`${base}/api/books/${book.id}/version/rewrite`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: 'outline' }),
+      signal: ctrl.signal,
+    });
+    await readUntilText(res, '大纲');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const bk = await store.readBook(book.id);
+    assert.equal(store.currentText(bk.outline), '新大纲');
+    assert.equal(bk.title, '写侦探故事');
+    assert.equal(bk.titleSource, 'default');
+  }, titleDeps);
+});
+
 test('manual 书名不被大纲生成覆盖', async () => {
   await withServer(async () => {
     const book = await store.createBook({ premise: 'p', title: '人工书名' });

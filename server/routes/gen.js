@@ -77,9 +77,12 @@ export function mountGenRoutes(app, deps = {}) {
                 content: buildBookTitleInstruction(freshBook.premise, full),
               }],
             });
+            assertClientAlive(req, res);
             const title = sanitizeGeneratedTitle(rawTitle);
             if (title) {
+              assertClientAlive(req, res);
               const latest = await store.readBook(req.params.id);
+              assertClientAlive(req, res);
               if (latest.titleSource === 'default') {
                 latest.title = title;
                 latest.titleSource = 'ai';
