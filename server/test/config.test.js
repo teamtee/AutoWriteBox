@@ -92,6 +92,36 @@ test('非法每章目标字数返回 JSON 错误且不覆盖旧值', async () =>
   });
 });
 
+test('非字符串配置字段返回 JSON 错误且不覆盖旧值', async () => {
+  await withServer(async () => {
+    await fetch(`${base}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: 'https://x/v1', model: 'm', apiKey: 'sk-real' }),
+    });
+
+    for (const patch of [
+      { baseUrl: { bad: 'object' } },
+      { model: ['bad'] },
+      { apiKey: 123 },
+    ]) {
+      const r = await fetch(`${base}/api/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      });
+
+      assert.equal(r.status, 400);
+      const body = await r.json();
+      assert.match(body.error, /BAD_CONFIG_TEXT_FIELD/);
+      const real = await store.readConfig();
+      assert.equal(real.baseUrl, 'https://x/v1');
+      assert.equal(real.model, 'm');
+      assert.equal(real.apiKey, 'sk-real');
+    }
+  });
+});
+
 test('配置文件损坏时返回 JSON 错误，不伪装成默认配置', async () => {
   writeFileSync(join(root, 'config.json'), '{bad json', 'utf8');
 

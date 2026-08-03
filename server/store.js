@@ -379,6 +379,11 @@ export async function readConfig() {
 export async function writeConfig(patch) {
   return withStoreLock(configLockKey(), async () => {
     const cur = await readConfig();
+    for (const field of ['baseUrl', 'model', 'apiKey']) {
+      if (patch[field] !== undefined && typeof patch[field] !== 'string') {
+        throw new Error('BAD_CONFIG_TEXT_FIELD');
+      }
+    }
     if (patch.chapterWordTarget !== undefined) {
       const target = patch.chapterWordTarget;
       if (!Number.isFinite(target) || target <= 0) throw new Error('BAD_CHAPTER_WORD_TARGET');
