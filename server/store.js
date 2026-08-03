@@ -373,7 +373,9 @@ export async function renameBook(id, title) {
   const safeBookId = safeId(id);
   return withStoreLock(bookJsonLockKey(safeBookId), async () => {
     const book = await readBook(safeBookId);
-    book.title = title || book.title;
+    const nextTitle = typeof title === 'string' ? title.trim() : '';
+    if (!nextTitle) return book;
+    book.title = nextTitle;
     book.titleSource = 'manual';
     await writeBookUnlocked(safeBookId, book);
     return book;

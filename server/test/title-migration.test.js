@@ -88,6 +88,19 @@ test('renameBook 标记 manual', async () => {
   assert.equal(renamed.titleSource, 'manual');
 });
 
+test('renameBook 空白标题不标记 manual 也不刷新 updatedAt', async () => {
+  const b = await store.createBook({ premise: 'p' });
+  const before = await store.readBook(b.id);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  const renamed = await store.renameBook(b.id, '   ');
+
+  assert.equal(renamed.title, before.title);
+  assert.equal(renamed.titleSource, 'default');
+  const after = await store.readBook(b.id);
+  assert.equal(after.updatedAt, before.updatedAt);
+});
+
 test('AI 分部旧标题剥离剧情走向，只保留纯标题', async () => {
   const b = await store.createBook({ premise: 'p' });
   const bookDir = join(root, 'books', b.id);
