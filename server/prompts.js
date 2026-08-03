@@ -36,10 +36,13 @@ export function buildContext({ book = {}, section = {}, prevChapter = null }) {
   return s.trim();
 }
 
-export function buildChapterInstruction({ chapterIndex, wordTarget, mode, whip }) {
+export function buildChapterInstruction({ chapterIndex, wordTarget, mode, whip, currentContent }) {
   const base = `请写第 ${chapterIndex} 章正文，约 ${wordTarget} 字，直接输出正文，不要标题和解说。`;
   if (mode === 'rewrite') return `重写第 ${chapterIndex} 章，保持大纲方向，换一种写法。${base}`;
-  if (mode === 'whip') return `用户对当前内容不满，最高优先级要求：『${whip}』。请据此重写。${base}`;
+  if (mode === 'whip') {
+    const current = currentContent ? `\n【当前章原文】\n${currentContent}\n` : '';
+    return `${current}用户对当前内容不满，最高优先级要求：『${whip}』。请据此重写。${base}`;
+  }
   return base;
 }
 

@@ -184,6 +184,39 @@ test('已有完成章节时不再为默认部名自动命名', async () => {
   });
 });
 
+test('gen/chapter whip 把当前章原文交给 LLM 参考', async () => {
+  let capturedInstruction = '';
+  const whipDeps = {
+    async *streamChat({ messages }) {
+      capturedInstruction = messages?.[0]?.content ?? '';
+      yield '改后正文';
+    },
+    async nonStreamChat() {
+      return JSON.stringify({ summary: '新小结', progress: '新进展', newCharacters: [] });
+    },
+  };
+
+  await withServer(async () => {
+    const book = await store.createBook({ premise: 'p' });
+    const s = await store.addSection(book.id, {});
+    const c = await store.addChapter(book.id, s.id, {});
+    await store.versionSet(book.id, `section:${s.id}:chapter:${c.id}`, '原始正文，有一场太平淡的争吵。');
+
+    const res = await post('/api/gen/chapter', {
+      bookId: book.id,
+      sectionId: s.id,
+      chapterId: c.id,
+      mode: 'whip',
+      whip: '把争吵写得更尖锐',
+    });
+    const sse = await readSSE(res);
+
+    assert.match(sse, /"done":true/);
+    assert.match(capturedInstruction, /把争吵写得更尖锐/);
+    assert.match(capturedInstruction, /原始正文，有一场太平淡的争吵。/);
+  }, whipDeps);
+});
+
 test('version/rewrite path=outline 流式生成后写入 book.outline（版本化）', async () => {
   await withServer(async () => {
     const book = await j(await post('/api/books', { premise: '写侦探故事' }));

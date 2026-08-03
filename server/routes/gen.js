@@ -116,8 +116,9 @@ export function mountGenRoutes(app, deps = {}) {
 
       const system = buildSystemPrompt(book.settings.core);
       const context = buildContext({ book, section, prevChapter });
+      const currentContent = mode === 'whip' ? store.currentText(chapter.body) : '';
       const instruction = context + '\n\n' +
-        buildChapterInstruction({ chapterIndex: chapter.index, wordTarget: config.chapterWordTarget, mode, whip });
+        buildChapterInstruction({ chapterIndex: chapter.index, wordTarget: config.chapterWordTarget, mode, whip, currentContent });
 
       full = await streamInto(res, { config, system, instruction });
       store.commitVersion(chapter.body, full);      // 写入新版；writeChapter 会同步派生 content
