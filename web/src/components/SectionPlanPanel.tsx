@@ -1,14 +1,30 @@
 import { parseSectionTitles } from '../sections';
 
-export function SectionPlanPanel({ text, streaming, onAdopt, onClose }: {
+export function shouldDisableSectionAdoption({ streaming, adopting, titleCount }: {
+  streaming: boolean;
+  adopting: boolean;
+  titleCount: number;
+}) {
+  return streaming || adopting || titleCount === 0;
+}
+
+export function shouldDisableSectionPlanClose({ adopting }: { adopting: boolean }) {
+  return adopting;
+}
+
+export function SectionPlanPanel({ text, streaming, adopting = false, onAdopt, onClose }: {
   text: string;
   streaming: boolean;
+  adopting?: boolean;
   onAdopt: (titles: string[]) => void;
   onClose: () => void;
 }) {
   const titles = parseSectionTitles(text);
+  const disabled = shouldDisableSectionAdoption({ streaming, adopting, titleCount: titles.length });
+  const closeDisabled = shouldDisableSectionPlanClose({ adopting });
+  const close = () => { if (!closeDisabled) onClose(); };
   return (
-    <div className="modal-mask" onClick={onClose}>
+    <div className="modal-mask" onClick={close}>
       <div className="plan-panel sketch" onClick={(e) => e.stopPropagation()}>
         <h2>🧩 AI 分部规划</h2>
         <pre className="plan-text">
@@ -22,9 +38,9 @@ export function SectionPlanPanel({ text, streaming, onAdopt, onClose }: {
           </div>
         )}
         <div className="plan-actions">
-          <button className="hbtn accent-2" disabled={streaming || titles.length === 0}
-            onClick={() => onAdopt(titles)}>✓ 采纳并创建这些部</button>
-          <button className="hbtn" onClick={onClose}>取消</button>
+          <button className="hbtn accent-2" disabled={disabled}
+            onClick={() => { if (!disabled) onAdopt(titles); }}>{adopting ? '正在创建…' : '✓ 采纳并创建这些部'}</button>
+          <button className="hbtn" disabled={closeDisabled} onClick={close}>取消</button>
         </div>
       </div>
     </div>

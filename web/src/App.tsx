@@ -119,6 +119,24 @@ export async function adoptSectionTitles({
   return { created, total: titles.length, ok: true };
 }
 
+export async function runExclusiveSectionAdoption<T>({
+  isRunning,
+  setRunning,
+  task,
+}: {
+  isRunning: () => boolean;
+  setRunning: (running: boolean) => void;
+  task: () => Promise<T>;
+}) {
+  if (isRunning()) return null;
+  setRunning(true);
+  try {
+    return await task();
+  } finally {
+    setRunning(false);
+  }
+}
+
 export default function App() {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
@@ -136,7 +154,9 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [planText, setPlanText] = useState('');
+  const [planAdopting, setPlanAdopting] = useState(false);
   const abortRef = useRef<null | (() => void)>(null);
+  const planAdoptingRef = useRef(false);
 
   // 拉取书架列表
   const loadShelf = async () => loadShelfBooks(
@@ -265,15 +285,19 @@ export default function App() {
     });
   };
   const adoptSections = async (titles: string[]) => {
-    await adoptSectionTitles({
-      titles,
-      addSection: (title) => api.addSection(bookId, title, 'ai'),
-      reload: () => reload(bookId),
-      onSuccess: (created) => toast.success(`✓ 已创建 ${created} 个部`),
-      onPartialFailure: (created, total, e) => toast.error(`采纳分部部分成功：已创建 ${created}/${total} 个，后续失败：${messageOf(e)}`),
-      onRefreshFailure: (created, total, e) => toast.error(`采纳分部已创建 ${created}/${total} 个，但刷新失败：${messageOf(e)}`),
-      onFailure: (e) => toast.error('采纳分部失败：' + messageOf(e)),
-      onFinish: () => setPlanOpen(false),
+    await runExclusiveSectionAdoption({
+      isRunning: () => planAdoptingRef.current,
+      setRunning: (running) => { planAdoptingRef.current = running; setPlanAdopting(running); },
+      task: () => adoptSectionTitles({
+        titles,
+        addSection: (title) => api.addSection(bookId, title, 'ai'),
+        reload: () => reload(bookId),
+        onSuccess: (created) => toast.success(`✓ 已创建 ${created} 个部`),
+        onPartialFailure: (created, total, e) => toast.error(`采纳分部部分成功：已创建 ${created}/${total} 个，后续失败：${messageOf(e)}`),
+        onRefreshFailure: (created, total, e) => toast.error(`采纳分部已创建 ${created}/${total} 个，但刷新失败：${messageOf(e)}`),
+        onFailure: (e) => toast.error('采纳分部失败：' + messageOf(e)),
+        onFinish: () => setPlanOpen(false),
+      }),
     });
   };
   const stopGen = () => { abortRef.current?.(); setStreaming(false); setStreamingPath(null); setStatusText(''); };
@@ -305,7 +329,7 @@ export default function App() {
             <Actions streaming={streaming} onNext={() => runChapter('next')} onWhip={(t) => runChapter('whip', t)} onStop={stopGen} />}
         </div>
       </div>
-      {planOpen && <SectionPlanPanel text={planText} streaming={streaming}
+      {planOpen && <SectionPlanPanel text={planText} streaming={streaming} adopting={planAdopting}
         onAdopt={adoptSections} onClose={() => { if (streaming) stopGen(); setPlanOpen(false); }} />}
     </div>
   );

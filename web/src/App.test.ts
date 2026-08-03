@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { BookSummary } from './types';
-import { adoptSectionTitles, loadShelfBooks, runShelfMutation, shouldShowFirstRun } from './App';
+import {
+  adoptSectionTitles,
+  loadShelfBooks,
+  runExclusiveSectionAdoption,
+  runShelfMutation,
+  shouldShowFirstRun,
+} from './App';
 
 const book = (id: string): BookSummary => ({
   id,
@@ -191,5 +197,36 @@ describe('section adoption', () => {
     expect(onRefreshFailure).toHaveBeenCalledWith(2, 2, error);
     expect(onFailure).not.toHaveBeenCalled();
     expect(onFinish).toHaveBeenCalledOnce();
+  });
+
+  it('ignores concurrent adoption while another adoption is running', async () => {
+    let locked = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const task = vi.fn(async () => {
+      await gate;
+      return 'created';
+    });
+    const setRunning = vi.fn((next: boolean) => { locked = next; });
+
+    const first = runExclusiveSectionAdoption({
+      isRunning: () => locked,
+      setRunning,
+      task,
+    });
+    const second = await runExclusiveSectionAdoption({
+      isRunning: () => locked,
+      setRunning,
+      task,
+    });
+
+    expect(second).toBeNull();
+    expect(task).toHaveBeenCalledOnce();
+
+    release();
+    await expect(first).resolves.toBe('created');
+    expect(setRunning).toHaveBeenNthCalledWith(1, true);
+    expect(setRunning).toHaveBeenLastCalledWith(false);
+    expect(locked).toBe(false);
   });
 });
