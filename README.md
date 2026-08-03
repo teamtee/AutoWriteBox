@@ -12,7 +12,8 @@
 - macOS：双击 `启动.command`（首次运行若被 Gatekeeper 拦截，右键 → 打开 → 允许）
 - Windows：双击 `启动.bat`
 
-脚本会自动完成：安装根依赖 → 若无 `web/dist` 则构建前端 → 启动服务 → 打开浏览器到 `http://localhost:4399`。
+脚本会自动完成：安装根依赖 → 若无 `web/dist` 则构建前端 → 检查 4399 端口 → 启动服务 → 打开浏览器到 `http://localhost:4399`。
+如果 4399 已被占用，脚本只会提示占用 PID 并退出，不会自动结束其它进程。
 
 也可以手动运行：
 
@@ -43,6 +44,6 @@ npm start       # 启动服务，监听 4399（可用 PORT 覆盖）
 
 ## 常见问题
 
-- 服务启动失败：检查 4399 端口是否被占用，可通过 `PORT=5001 npm start` 换端口。
+- 服务启动失败：检查 4399 端口是否被占用。macOS/Linux 可通过 `PORT=5001 npm start` 换端口；Windows 可通过 `set PORT=5001 && npm start` 换端口。
 - 生成没反应：进入 API 设置检查 Base URL、模型名、Key 是否正确；日志会打印在启动脚本的终端窗口里。
 - 生成的 JSON 报错：`extractDigest` 会自动尝试兜底，若仍失败，本次 digest 不会阻塞正文保存，可稍后再抽打一下重试。
