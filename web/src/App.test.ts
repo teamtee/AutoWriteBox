@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { BookSummary } from './types';
-import { loadShelfBooks, runShelfMutation, shouldShowFirstRun } from './App';
+import { adoptSectionTitles, loadShelfBooks, runShelfMutation, shouldShowFirstRun } from './App';
 
 const book = (id: string): BookSummary => ({
   id,
@@ -100,5 +100,96 @@ describe('shelf loading', () => {
     expect(refresh).not.toHaveBeenCalled();
     expect(onSuccess).not.toHaveBeenCalled();
     expect(onFailure).toHaveBeenCalledWith(error);
+  });
+});
+
+describe('section adoption', () => {
+  it('reloads and finishes the flow when section adoption partially succeeded', async () => {
+    const error = new Error('NETWORK_DOWN');
+    const addSection = vi.fn(async (title: string) => {
+      if (title === '终局') throw error;
+    });
+    const reload = vi.fn(async () => undefined);
+    const onSuccess = vi.fn();
+    const onPartialFailure = vi.fn();
+    const onFailure = vi.fn();
+    const onFinish = vi.fn();
+
+    const result = await adoptSectionTitles({
+      titles: ['起源', '暗潮', '终局'],
+      addSection,
+      reload,
+      onSuccess,
+      onPartialFailure,
+      onFailure,
+      onFinish,
+    });
+
+    expect(result).toEqual({ created: 2, total: 3, ok: false });
+    expect(addSection).toHaveBeenNthCalledWith(1, '起源');
+    expect(addSection).toHaveBeenNthCalledWith(2, '暗潮');
+    expect(addSection).toHaveBeenNthCalledWith(3, '终局');
+    expect(reload).toHaveBeenCalledOnce();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onPartialFailure).toHaveBeenCalledWith(2, 3, error);
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(onFinish).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the adoption flow open when no section was created', async () => {
+    const error = new Error('BOOK_NOT_FOUND');
+    const addSection = vi.fn(async () => { throw error; });
+    const reload = vi.fn(async () => undefined);
+    const onSuccess = vi.fn();
+    const onPartialFailure = vi.fn();
+    const onFailure = vi.fn();
+    const onFinish = vi.fn();
+
+    const result = await adoptSectionTitles({
+      titles: ['起源', '暗潮'],
+      addSection,
+      reload,
+      onSuccess,
+      onPartialFailure,
+      onFailure,
+      onFinish,
+    });
+
+    expect(result).toEqual({ created: 0, total: 2, ok: false });
+    expect(reload).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onPartialFailure).not.toHaveBeenCalled();
+    expect(onFailure).toHaveBeenCalledWith(error);
+    expect(onFinish).not.toHaveBeenCalled();
+  });
+
+  it('finishes the flow when sections were created but the refresh failed', async () => {
+    const error = new Error('TREE_RELOAD_FAILED');
+    const addSection = vi.fn(async () => undefined);
+    const reload = vi.fn(async () => { throw error; });
+    const onSuccess = vi.fn();
+    const onPartialFailure = vi.fn();
+    const onRefreshFailure = vi.fn();
+    const onFailure = vi.fn();
+    const onFinish = vi.fn();
+
+    const result = await adoptSectionTitles({
+      titles: ['起源', '暗潮'],
+      addSection,
+      reload,
+      onSuccess,
+      onPartialFailure,
+      onRefreshFailure,
+      onFailure,
+      onFinish,
+    });
+
+    expect(result).toEqual({ created: 2, total: 2, ok: false });
+    expect(reload).toHaveBeenCalledOnce();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onPartialFailure).not.toHaveBeenCalled();
+    expect(onRefreshFailure).toHaveBeenCalledWith(2, 2, error);
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(onFinish).toHaveBeenCalledOnce();
   });
 });

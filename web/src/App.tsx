@@ -68,6 +68,57 @@ export async function runShelfMutation({
   }
 }
 
+export async function adoptSectionTitles({
+  titles,
+  addSection,
+  reload,
+  onSuccess,
+  onPartialFailure,
+  onRefreshFailure,
+  onFailure,
+  onFinish,
+}: {
+  titles: string[];
+  addSection: (title: string) => Promise<unknown>;
+  reload: () => Promise<void>;
+  onSuccess: (created: number) => void;
+  onPartialFailure: (created: number, total: number, e: unknown) => void;
+  onRefreshFailure?: (created: number, total: number, e: unknown) => void;
+  onFailure: (e: unknown) => void;
+  onFinish: () => void;
+}) {
+  let created = 0;
+  let addError: unknown = null;
+  for (const title of titles) {
+    try {
+      await addSection(title);
+      created += 1;
+    } catch (e) {
+      addError = e;
+      break;
+    }
+  }
+  if (created === 0 && addError) {
+    onFailure(addError);
+    return { created, total: titles.length, ok: false };
+  }
+  try {
+    await reload();
+  } catch (e) {
+    onRefreshFailure?.(created, titles.length, e);
+    onFinish();
+    return { created, total: titles.length, ok: false };
+  }
+  if (addError) {
+    onPartialFailure(created, titles.length, addError);
+    onFinish();
+    return { created, total: titles.length, ok: false };
+  }
+  onSuccess(created);
+  onFinish();
+  return { created, total: titles.length, ok: true };
+}
+
 export default function App() {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
@@ -214,14 +265,16 @@ export default function App() {
     });
   };
   const adoptSections = async (titles: string[]) => {
-    try {
-      for (const t of titles) await api.addSection(bookId, t, 'ai');
-      await reload(bookId);
-      setPlanOpen(false);
-      toast.success(`✓ 已创建 ${titles.length} 个部`);
-    } catch (e) {
-      toast.error('采纳分部失败：' + messageOf(e));
-    }
+    await adoptSectionTitles({
+      titles,
+      addSection: (title) => api.addSection(bookId, title, 'ai'),
+      reload: () => reload(bookId),
+      onSuccess: (created) => toast.success(`✓ 已创建 ${created} 个部`),
+      onPartialFailure: (created, total, e) => toast.error(`采纳分部部分成功：已创建 ${created}/${total} 个，后续失败：${messageOf(e)}`),
+      onRefreshFailure: (created, total, e) => toast.error(`采纳分部已创建 ${created}/${total} 个，但刷新失败：${messageOf(e)}`),
+      onFailure: (e) => toast.error('采纳分部失败：' + messageOf(e)),
+      onFinish: () => setPlanOpen(false),
+    });
   };
   const stopGen = () => { abortRef.current?.(); setStreaming(false); setStreamingPath(null); setStatusText(''); };
 
