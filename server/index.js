@@ -14,6 +14,12 @@ export function setWebDist(p) { WEB_DIST = p; }
 export function createApp() {
   const app = express();
   app.use(express.json({ limit: '5mb' }));
+  app.use((err, req, res, next) => {
+    if (err?.type === 'entity.parse.failed') {
+      return res.status(400).json({ error: String(err.message || err) });
+    }
+    next(err);
+  });
 
   app.get('/api/health', (req, res) => res.json({ ok: true }));
   mountConfigRoutes(app);

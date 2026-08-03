@@ -147,6 +147,21 @@ test('配置请求体必须是普通对象，不接受数组污染配置文件',
   });
 });
 
+test('请求体 JSON 损坏时返回 JSON 错误，不返回默认 HTML 错误页', async () => {
+  await withServer(async () => {
+    const r = await fetch(`${base}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"model":',
+    });
+
+    assert.equal(r.status, 400);
+    assert.match(r.headers.get('content-type') || '', /application\/json/);
+    const body = await r.json();
+    assert.match(body.error, /JSON|Unexpected/);
+  });
+});
+
 test('配置文件损坏时返回 JSON 错误，不伪装成默认配置', async () => {
   writeFileSync(join(root, 'config.json'), '{bad json', 'utf8');
 
