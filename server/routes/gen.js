@@ -155,6 +155,7 @@ export function mountGenRoutes(app, deps = {}) {
           signal: res.locals.abortSignal,
           messages: [{ role: 'user', content: `以下是正文：\n${full}\n\n${DIGEST_INSTRUCTION}` }],
         });
+        assertClientAlive(req, res);
         const d = extractDigest(digestText);
         // 仅当 digest 解析出有效值时才更新，避免空值覆盖已有 summary/progress（断片保护）
         const latestChapter = await store.readChapter(bookId, sectionId, chapterId);

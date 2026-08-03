@@ -185,6 +185,65 @@ test('gen/chapter digest 迟到不覆盖期间保存的章节新版', async () =
   }, hangingDigestDeps);
 });
 
+test('gen/chapter digest 阶段客户端停止后不继续写入摘要元数据', async () => {
+  let releaseDigest;
+  let digestStartedResolve;
+  let digestFinishedResolve;
+  const digestStarted = new Promise((resolve) => { digestStartedResolve = resolve; });
+  const digestCanReturn = new Promise((resolve) => { releaseDigest = resolve; });
+  const digestFinished = new Promise((resolve) => { digestFinishedResolve = resolve; });
+  const hangingDigestDeps = {
+    async *streamChat() { yield '这是'; yield '正文'; },
+    async nonStreamChat() {
+      digestStartedResolve();
+      await digestCanReturn;
+      digestFinishedResolve();
+      return JSON.stringify({
+        chapterTitle: '夜雨来客',
+        sectionTitle: '暗潮初现',
+        summary: '小结A',
+        progress: '下一步B',
+        newCharacters: [{ name: '龙套甲', role: '路人', desc: 'x' }],
+      });
+    },
+  };
+
+  await withServer(async () => {
+    const book = await store.createBook({ premise: 'p' });
+    const s = await store.addSection(book.id, {});
+    const ctrl = new AbortController();
+    const res = await fetch(base + '/api/gen/chapter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookId: book.id, sectionId: s.id, mode: 'next' }),
+      signal: ctrl.signal,
+    });
+    await readUntilText(res, '正文');
+    await digestStarted;
+
+    const secBeforeAbort = await store.readSection(book.id, s.id);
+    const chapterId = secBeforeAbort.chapters[0];
+    ctrl.abort();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseDigest();
+    await digestFinished;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const sec = await store.readSection(book.id, s.id);
+    const ch = await store.readChapter(book.id, s.id, chapterId);
+    const bk = await store.readBook(book.id);
+    assert.equal(store.currentText(ch.body), '这是正文');
+    assert.equal(ch.summary, '');
+    assert.equal(ch.progress, '');
+    assert.equal(ch.title, '');
+    assert.deepEqual(ch.characters, []);
+    assert.equal(sec.summary, '');
+    assert.equal(sec.progress, '');
+    assert.equal(sec.title, '');
+    assert.equal(bk.progress, '');
+  }, hangingDigestDeps);
+});
+
 test('gen/chapter next 客户端停止后不继续落盘新章', async () => {
   let releaseStream;
   let streamSettledResolve;
