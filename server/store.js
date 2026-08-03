@@ -59,6 +59,11 @@ export async function writeBook(id, book) {
   await atomicWriteJson(join(bookDir(id), 'book.json'), book);
 }
 
+async function touchBook(id) {
+  const book = await readBook(id);
+  await writeBook(id, book);
+}
+
 export async function listBooks() {
   let ids = [];
   try { ids = await readdir(booksDir()); }
@@ -150,6 +155,7 @@ export async function readSection(bookId, sectionId) {
 }
 export async function writeSection(bookId, sectionId, obj) {
   await atomicWriteJson(join(bookDir(bookId), safeId(sectionId), 'section.json'), obj);
+  await touchBook(bookId);
 }
 
 // ——— chapter ———
@@ -177,6 +183,7 @@ export async function readChapter(bookId, sectionId, chapterId) {
 export async function writeChapter(bookId, sectionId, chapterId, obj) {
   if (obj.body) obj.content = currentText(obj.body);  // 派生 content 与 body 保持同步
   await atomicWriteJson(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), obj);
+  await touchBook(bookId);
 }
 
 // ——— history 回退栈（限深 20）———

@@ -97,3 +97,15 @@ test('versionSet 章节同步派生 content', async () => {
   assert.equal(store.currentText(ch.body), '章节正文A');
   assert.equal(ch.content, '章节正文A');
 });
+
+test('章节写入会更新书架 updatedAt', async () => {
+  const b = await store.createBook({ premise: 'p' });
+  const s = await store.addSection(b.id, {});
+  const before = (await store.readBook(b.id)).updatedAt;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  await store.addChapter(b.id, s.id, {});
+
+  const after = (await store.readBook(b.id)).updatedAt;
+  assert.ok(Date.parse(after) > Date.parse(before));
+});
