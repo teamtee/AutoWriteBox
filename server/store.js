@@ -14,6 +14,9 @@ export function safeId(id) {
   return id;
 }
 const bookDir = (id) => join(booksDir(), safeId(id));
+const bookJsonLockKey = (bookId) => `book:${safeId(bookId)}:book-json`;
+const chapterFileLockKey = (bookId, sectionId, chapterId) =>
+  `book:${safeId(bookId)}:section:${safeId(sectionId)}:chapter:${safeId(chapterId)}:file`;
 
 async function withStoreLock(key, fn) {
   const previous = storeLocks.get(key) || Promise.resolve();
@@ -73,14 +76,24 @@ export async function readBook(id) {
   }
 }
 
-export async function writeBook(id, book) {
+async function writeBookUnlocked(id, book) {
   book.updatedAt = new Date().toISOString();
   await atomicWriteJson(join(bookDir(id), 'book.json'), book);
 }
 
-async function touchBook(id) {
+export async function writeBook(id, book) {
+  const safeBookId = safeId(id);
+  return withStoreLock(bookJsonLockKey(safeBookId), () => writeBookUnlocked(safeBookId, book));
+}
+
+async function touchBookUnlocked(id) {
   const book = await readBook(id);
-  await writeBook(id, book);
+  await writeBookUnlocked(id, book);
+}
+
+async function touchBook(id) {
+  const safeBookId = safeId(id);
+  return withStoreLock(bookJsonLockKey(safeBookId), () => touchBookUnlocked(safeBookId));
 }
 
 export async function listBooks() {
@@ -208,10 +221,19 @@ export async function readChapter(bookId, sectionId, chapterId) {
   const ch = JSON.parse(await readFile(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), 'utf8'));
   return migrateChapterInPlace(ch);
 }
-export async function writeChapter(bookId, sectionId, chapterId, obj) {
+async function writeChapterFile(bookId, sectionId, chapterId, obj) {
   if (obj.body) obj.content = currentText(obj.body);  // 派生 content 与 body 保持同步
   await atomicWriteJson(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), obj);
-  await touchBook(bookId);
+}
+export async function writeChapter(bookId, sectionId, chapterId, obj) {
+  const safeBookId = safeId(bookId);
+  const safeSectionId = safeId(sectionId);
+  const safeChapterId = safeId(chapterId);
+  return withStoreLock(bookJsonLockKey(safeBookId), () =>
+    withStoreLock(chapterFileLockKey(safeBookId, safeSectionId, safeChapterId), async () => {
+      await writeChapterFile(safeBookId, safeSectionId, safeChapterId, obj);
+      await touchBookUnlocked(safeBookId);
+    }));
 }
 export async function deleteChapterFile(bookId, sectionId, chapterId) {
   await rm(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), { force: true });
@@ -332,31 +354,51 @@ export async function renameBook(id, title) {
 
 // ——— 统一版本读写 ———
 // path 形如：'outline' | 'core:world|style|constraints|pacing' | 'section:<sid>:chapter:<cid>'
+function versionLockKey(bookId, parsedPath) {
+  const safeBookId = safeId(bookId);
+  if (parsedPath.type === 'chapter') {
+    return chapterFileLockKey(safeBookId, parsedPath.sectionId, parsedPath.chapterId);
+  }
+  return bookJsonLockKey(safeBookId);
+}
+
 export async function versionMove(bookId, path, delta) {
   const p = parseVersionPath(path);
+  const safeBookId = safeId(bookId);
   if (p.type === 'chapter') {
-    const ch = await readChapter(bookId, p.sectionId, p.chapterId);
-    moveCursor(ch.body, delta);
-    await writeChapter(bookId, p.sectionId, p.chapterId, ch);
-    return ch.body;
+    return withStoreLock(bookJsonLockKey(safeBookId), () => withStoreLock(versionLockKey(safeBookId, p), async () => {
+      const ch = await readChapter(safeBookId, p.sectionId, p.chapterId);
+      moveCursor(ch.body, delta);
+      await writeChapterFile(safeBookId, p.sectionId, p.chapterId, ch);
+      await touchBookUnlocked(safeBookId);
+      return ch.body;
+    }));
   }
-  const b = await readBook(bookId);
-  const vf = p.type === 'outline' ? b.outline : b.settings.core[p.field];
-  moveCursor(vf, delta);
-  await writeBook(bookId, b);
-  return vf;
+  return withStoreLock(versionLockKey(safeBookId, p), async () => {
+    const b = await readBook(safeBookId);
+    const vf = p.type === 'outline' ? b.outline : b.settings.core[p.field];
+    moveCursor(vf, delta);
+    await writeBookUnlocked(safeBookId, b);
+    return vf;
+  });
 }
 export async function versionSet(bookId, path, text) {
   const p = parseVersionPath(path);
+  const safeBookId = safeId(bookId);
   if (p.type === 'chapter') {
-    const ch = await readChapter(bookId, p.sectionId, p.chapterId);
-    commitVersion(ch.body, text);
-    await writeChapter(bookId, p.sectionId, p.chapterId, ch);
-    return ch.body;
+    return withStoreLock(bookJsonLockKey(safeBookId), () => withStoreLock(versionLockKey(safeBookId, p), async () => {
+      const ch = await readChapter(safeBookId, p.sectionId, p.chapterId);
+      commitVersion(ch.body, text);
+      await writeChapterFile(safeBookId, p.sectionId, p.chapterId, ch);
+      await touchBookUnlocked(safeBookId);
+      return ch.body;
+    }));
   }
-  const b = await readBook(bookId);
-  const vf = p.type === 'outline' ? b.outline : b.settings.core[p.field];
-  commitVersion(vf, text);
-  await writeBook(bookId, b);
-  return vf;
+  return withStoreLock(versionLockKey(safeBookId, p), async () => {
+    const b = await readBook(safeBookId);
+    const vf = p.type === 'outline' ? b.outline : b.settings.core[p.field];
+    commitVersion(vf, text);
+    await writeBookUnlocked(safeBookId, b);
+    return vf;
+  });
 }

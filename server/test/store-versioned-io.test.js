@@ -87,6 +87,38 @@ test('versionSet + versionMove 往返（outline）', async () => {
   assert.equal(store.currentText(b2.outline), '第一版');
 });
 
+test('并发 versionSet outline 不丢失任何版本', async () => {
+  const b = await store.createBook({ premise: 'p' });
+
+  await Promise.all([
+    store.versionSet(b.id, 'outline', '第一版'),
+    store.versionSet(b.id, 'outline', '第二版'),
+    store.versionSet(b.id, 'outline', '第三版'),
+    store.versionSet(b.id, 'outline', '第四版'),
+  ]);
+
+  const back = await store.readBook(b.id);
+  assert.deepEqual(back.outline.versions, ['', '第一版', '第二版', '第三版', '第四版']);
+  assert.equal(back.outline.cursor, 4);
+});
+
+test('并发 versionSet outline 与 core 不互相覆盖 book.json', async () => {
+  const b = await store.createBook({ premise: 'p' });
+
+  await Promise.all([
+    store.versionSet(b.id, 'outline', '大纲第一版'),
+    store.versionSet(b.id, 'core:world', '世界观第一版'),
+    store.versionSet(b.id, 'core:style', '文风第一版'),
+    store.versionSet(b.id, 'core:pacing', '节奏第一版'),
+  ]);
+
+  const back = await store.readBook(b.id);
+  assert.deepEqual(back.outline.versions, ['', '大纲第一版']);
+  assert.deepEqual(back.settings.core.world.versions, ['', '世界观第一版']);
+  assert.deepEqual(back.settings.core.style.versions, ['', '文风第一版']);
+  assert.deepEqual(back.settings.core.pacing.versions, ['', '节奏第一版']);
+});
+
 test('versionSet 章节同步派生 content', async () => {
   const b = await store.createBook({ premise: 'p' });
   const s = await store.addSection(b.id, {});
@@ -96,6 +128,45 @@ test('versionSet 章节同步派生 content', async () => {
   const ch = await store.readChapter(b.id, s.id, c.id);
   assert.equal(store.currentText(ch.body), '章节正文A');
   assert.equal(ch.content, '章节正文A');
+});
+
+test('并发 versionSet chapter 不丢失任何版本并同步 content', async () => {
+  const b = await store.createBook({ premise: 'p' });
+  const s = await store.addSection(b.id, {});
+  const c = await store.addChapter(b.id, s.id, {});
+  const path = `section:${s.id}:chapter:${c.id}`;
+
+  await Promise.all([
+    store.versionSet(b.id, path, '章节正文A'),
+    store.versionSet(b.id, path, '章节正文B'),
+    store.versionSet(b.id, path, '章节正文C'),
+    store.versionSet(b.id, path, '章节正文D'),
+  ]);
+
+  const ch = await store.readChapter(b.id, s.id, c.id);
+  assert.deepEqual(ch.body.versions, ['', '章节正文A', '章节正文B', '章节正文C', '章节正文D']);
+  assert.equal(ch.body.cursor, 4);
+  assert.equal(ch.content, '章节正文D');
+});
+
+test('并发 versionSet outline 与 chapter 不互相覆盖 book.json', async () => {
+  const b = await store.createBook({ premise: 'p' });
+  const s = await store.addSection(b.id, {});
+  const c = await store.addChapter(b.id, s.id, {});
+  const path = `section:${s.id}:chapter:${c.id}`;
+  const outlines = Array.from({ length: 12 }, (_, i) => `大纲第${i + 1}版`);
+  const chapters = Array.from({ length: 12 }, (_, i) => `章节正文${i + 1}`);
+
+  await Promise.all([
+    ...outlines.map((text) => store.versionSet(b.id, 'outline', text)),
+    ...chapters.map((text) => store.versionSet(b.id, path, text)),
+  ]);
+
+  const back = await store.readBook(b.id);
+  const ch = await store.readChapter(b.id, s.id, c.id);
+  assert.deepEqual(back.outline.versions, ['', ...outlines]);
+  assert.deepEqual(ch.body.versions, ['', ...chapters]);
+  assert.equal(ch.content, '章节正文12');
 });
 
 test('章节写入会更新书架 updatedAt', async () => {
