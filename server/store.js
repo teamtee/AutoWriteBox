@@ -166,23 +166,25 @@ function migrateBookTitleInPlace(book) {
 export async function addSection(bookId, { title, titleSource } = {}) {
   const safeBookId = safeId(bookId);
   return withStoreLock(`book:${safeBookId}:sections`, async () => {
-    const book = await readBook(safeBookId);
-    const index = book.sections.length + 1;
-    const id = `section-${pad2(index)}`;
-    const cleanTitle = typeof title === 'string' ? title.trim() : '';
-    const source = cleanTitle ? (TITLE_SOURCES.has(titleSource) ? titleSource : 'manual') : 'default';
-    const section = {
-      id, index,
-      title: source === 'ai' ? stripGeneratedTitleDescription(cleanTitle) : cleanTitle,
-      titleSource: source,
-      outline: { content: '', history: [] },
-      characters: [], summary: '', progress: '', chapters: [],
-    };
-    await mkdir(join(bookDir(safeBookId), id), { recursive: true });
-    await atomicWriteJson(join(bookDir(safeBookId), id, 'section.json'), section);
-    book.sections.push(id);
-    await writeBook(safeBookId, book);
-    return section;
+    return withStoreLock(bookJsonLockKey(safeBookId), async () => {
+      const book = await readBook(safeBookId);
+      const index = book.sections.length + 1;
+      const id = `section-${pad2(index)}`;
+      const cleanTitle = typeof title === 'string' ? title.trim() : '';
+      const source = cleanTitle ? (TITLE_SOURCES.has(titleSource) ? titleSource : 'manual') : 'default';
+      const section = {
+        id, index,
+        title: source === 'ai' ? stripGeneratedTitleDescription(cleanTitle) : cleanTitle,
+        titleSource: source,
+        outline: { content: '', history: [] },
+        characters: [], summary: '', progress: '', chapters: [],
+      };
+      await mkdir(join(bookDir(safeBookId), id), { recursive: true });
+      await atomicWriteJson(join(bookDir(safeBookId), id, 'section.json'), section);
+      book.sections.push(id);
+      await writeBookUnlocked(safeBookId, book);
+      return section;
+    });
   });
 }
 export async function readSection(bookId, sectionId) {
@@ -345,11 +347,14 @@ export async function deleteBook(id) {
   await rm(bookDir(id), { recursive: true, force: true });
 }
 export async function renameBook(id, title) {
-  const book = await readBook(id);
-  book.title = title || book.title;
-  book.titleSource = 'manual';
-  await writeBook(id, book);
-  return book;
+  const safeBookId = safeId(id);
+  return withStoreLock(bookJsonLockKey(safeBookId), async () => {
+    const book = await readBook(safeBookId);
+    book.title = title || book.title;
+    book.titleSource = 'manual';
+    await writeBookUnlocked(safeBookId, book);
+    return book;
+  });
 }
 
 // ——— 统一版本读写 ———
