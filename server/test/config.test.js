@@ -41,6 +41,19 @@ test('掩码 Key 再次保存不覆盖真实 Key', async () => {
   });
 });
 
+test('并发掩码保存不覆盖同时写入的新 API Key', async () => {
+  await store.writeConfig({ apiKey: 'sk-old' });
+
+  await Promise.all([
+    store.writeConfig({ apiKey: 'sk-new' }),
+    ...Array.from({ length: 50 }, (_, i) =>
+      store.writeConfig({ model: `m${i}`, apiKey: 'sk-****' })),
+  ]);
+
+  const real = await store.readConfig();
+  assert.equal(real.apiKey, 'sk-new');
+});
+
 test('保存空 API Key 会清除旧 Key', async () => {
   await withServer(async () => {
     await fetch(`${base}/api/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: 'sk-real' }) });

@@ -343,6 +343,7 @@ export function rollback(obj, field) {
 
 // ——— 全局配置 ———
 const configPath = () => join(DATA_ROOT, 'config.json');
+const configLockKey = () => 'config:config-json';
 const DEFAULT_CONFIG = { baseUrl: '', model: '', apiKey: '', chapterWordTarget: 2000 };
 
 export async function readConfig() {
@@ -353,12 +354,14 @@ export async function readConfig() {
   }
 }
 export async function writeConfig(patch) {
-  const cur = await readConfig();
-  const next = { ...cur, ...patch };
-  if (patch.apiKey === undefined || patch.apiKey === 'sk-****') next.apiKey = cur.apiKey;  // 保留原 Key
-  await mkdir(DATA_ROOT, { recursive: true });
-  await atomicWriteJson(configPath(), next);
-  return next;
+  return withStoreLock(configLockKey(), async () => {
+    const cur = await readConfig();
+    const next = { ...cur, ...patch };
+    if (patch.apiKey === undefined || patch.apiKey === 'sk-****') next.apiKey = cur.apiKey;  // 保留原 Key
+    await mkdir(DATA_ROOT, { recursive: true });
+    await atomicWriteJson(configPath(), next);
+    return next;
+  });
 }
 
 // ——— 书架管理 ———
