@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as store from '../store.js';
@@ -92,6 +92,51 @@ test('给不存在的书加部返回 JSON 错误，不退出服务', async () =>
     assert.equal(r.status, 400);
     const body = await j(r);
     assert.match(body.error, /BOOK_NOT_FOUND/);
+
+    const health = await j(await fetch(`${base}/api/health`));
+    assert.equal(health.ok, true);
+  });
+});
+
+test('书架列表读取失败返回 JSON 错误，不挂住请求', async () => {
+  const fileRoot = join(tmpdir(), `novelbox-file-${process.pid}-${Date.now()}`);
+  writeFileSync(fileRoot, 'not a directory', 'utf8');
+  store.setDataRoot(fileRoot);
+
+  await withServer(async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1000);
+    const r = await fetch(`${base}/api/books`, { signal: ctrl.signal });
+    clearTimeout(timer);
+
+    assert.equal(r.status, 400);
+    const body = await j(r);
+    assert.match(body.error, /ENOTDIR/);
+
+    const health = await j(await fetch(`${base}/api/health`));
+    assert.equal(health.ok, true);
+  });
+});
+
+test('建书写入失败返回 JSON 错误，不挂住请求', async () => {
+  const fileRoot = join(tmpdir(), `novelbox-file-${process.pid}-${Date.now()}-create`);
+  writeFileSync(fileRoot, 'not a directory', 'utf8');
+  store.setDataRoot(fileRoot);
+
+  await withServer(async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1000);
+    const r = await fetch(`${base}/api/books`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ premise: 'p' }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+
+    assert.equal(r.status, 400);
+    const body = await j(r);
+    assert.match(body.error, /ENOTDIR/);
 
     const health = await j(await fetch(`${base}/api/health`));
     assert.equal(health.ok, true);

@@ -1,12 +1,17 @@
 import * as store from '../store.js';
 
 export function mountBookRoutes(app) {
-  app.get('/api/books', async (req, res) => res.json(await store.listBooks()));
+  app.get('/api/books', async (req, res) => {
+    try { res.json(await store.listBooks()); }
+    catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+  });
 
   app.post('/api/books', async (req, res) => {
-    const { premise, title } = req.body || {};
-    if (!premise) return res.status(400).json({ error: 'PREMISE_REQUIRED' });
-    res.json(await store.createBook({ premise, title }));
+    try {
+      const { premise, title } = req.body || {};
+      if (!premise) return res.status(400).json({ error: 'PREMISE_REQUIRED' });
+      res.json(await store.createBook({ premise, title }));
+    } catch (e) { res.status(400).json({ error: String(e.message || e) }); }
   });
 
   app.get('/api/books/:id/tree', async (req, res) => {
