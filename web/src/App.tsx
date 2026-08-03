@@ -16,6 +16,8 @@ import { Bookshelf } from './components/Bookshelf';
 // 顶层视图：书架 / 单本书
 type View = 'shelf' | 'book';
 
+const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e);
+
 export default function App() {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
@@ -41,7 +43,7 @@ export default function App() {
   const openBook = async (id: string) => {
     try {
       const t = await api.getTree(id); setTree(t); setSelection(firstSelectable(t)); setView('book');
-    } catch (e) { toast.error('打开失败：' + (e as Error).message); }
+    } catch (e) { toast.error('打开失败：' + messageOf(e)); }
   };
   const reload = async (bookId: string, sel?: Selection) => {
     const t = await api.getTree(bookId); setTree(t); if (sel) setSelection(sel);
@@ -62,11 +64,11 @@ export default function App() {
       onNew={() => setCreating(true)}
       onRename={async (id, title) => {
         try { await api.renameBook(id, title); await loadShelf(); toast.success('✓ 已改名'); }
-        catch (e) { toast.error('改名失败：' + (e as Error).message); }
+        catch (e) { toast.error('改名失败：' + messageOf(e)); }
       }}
       onDelete={async (id) => {
         try { await api.deleteBook(id); await loadShelf(); toast.success('✓ 已删除'); }
-        catch (e) { toast.error('删除失败：' + (e as Error).message); }
+        catch (e) { toast.error('删除失败：' + messageOf(e)); }
       }} />;
   }
 
@@ -74,9 +76,18 @@ export default function App() {
   const bookId = tree.book.id;
 
   // —— 统一版本操作 ——
-  const doMove = async (path: string, delta: number) => { await api.versionMove(bookId, path, delta); await reload(bookId); };
-  const doClear = async (path: string) => { await api.versionClear(bookId, path); await reload(bookId); toast.info('已清空（可用「上一个」找回）'); };
-  const doSave = async (path: string, text: string) => { await api.versionSave(bookId, path, text); await reload(bookId); toast.success('✓ 已保存'); };
+  const doMove = async (path: string, delta: number) => {
+    try { await api.versionMove(bookId, path, delta); await reload(bookId); }
+    catch (e) { toast.error('切换版本失败：' + messageOf(e)); }
+  };
+  const doClear = async (path: string) => {
+    try { await api.versionClear(bookId, path); await reload(bookId); toast.info('已清空（可用「上一个」找回）'); }
+    catch (e) { toast.error('清空失败：' + messageOf(e)); }
+  };
+  const doSave = async (path: string, text: string) => {
+    try { await api.versionSave(bookId, path, text); await reload(bookId); toast.success('✓ 已保存'); }
+    catch (e) { toast.error('保存失败：' + messageOf(e)); }
+  };
 
   // 状态文案：按 path 前缀区分
   const stageFor = (path: string) =>
@@ -132,9 +143,14 @@ export default function App() {
     });
   };
   const adoptSections = async (titles: string[]) => {
-    setPlanOpen(false);
-    for (const t of titles) await api.addSection(bookId, t, 'ai');
-    await reload(bookId); toast.success(`✓ 已创建 ${titles.length} 个部`);
+    try {
+      for (const t of titles) await api.addSection(bookId, t, 'ai');
+      await reload(bookId);
+      setPlanOpen(false);
+      toast.success(`✓ 已创建 ${titles.length} 个部`);
+    } catch (e) {
+      toast.error('采纳分部失败：' + messageOf(e));
+    }
   };
   const stopGen = () => { abortRef.current?.(); setStreaming(false); setStreamingPath(null); setStatusText(''); };
 
@@ -145,8 +161,16 @@ export default function App() {
       <div className="body">
         <Sidebar tree={tree} selection={selection} disabled={streaming}
           onSelect={setSelection}
-          onAddSection={async () => { await api.addSection(bookId); await reload(bookId); }}
-          onAddChapter={async (sid) => { const c = await api.addChapter(bookId, sid); await reload(bookId, { kind: 'chapter', sectionId: sid, chapterId: c.id }); }}
+          onAddSection={async () => {
+            try { await api.addSection(bookId); await reload(bookId); }
+            catch (e) { toast.error('新建部失败：' + messageOf(e)); }
+          }}
+          onAddChapter={async (sid) => {
+            try {
+              const c = await api.addChapter(bookId, sid);
+              await reload(bookId, { kind: 'chapter', sectionId: sid, chapterId: c.id });
+            } catch (e) { toast.error('新建章失败：' + messageOf(e)); }
+          }}
           onPlanSections={runSections} />
         <div className="content">
           <MainPanel tree={tree} selection={selection}
