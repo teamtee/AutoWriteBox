@@ -379,6 +379,10 @@ export async function readConfig() {
 export async function writeConfig(patch) {
   return withStoreLock(configLockKey(), async () => {
     const cur = await readConfig();
+    if (patch.chapterWordTarget !== undefined) {
+      const target = patch.chapterWordTarget;
+      if (!Number.isFinite(target) || target <= 0) throw new Error('BAD_CHAPTER_WORD_TARGET');
+    }
     const next = { ...cur, ...patch };
     if (patch.apiKey === undefined || patch.apiKey === 'sk-****') next.apiKey = cur.apiKey;  // 保留原 Key
     await mkdir(DATA_ROOT, { recursive: true });

@@ -71,6 +71,27 @@ test('保存空 API Key 会清除旧 Key', async () => {
   });
 });
 
+test('非法每章目标字数返回 JSON 错误且不覆盖旧值', async () => {
+  await withServer(async () => {
+    await fetch(`${base}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chapterWordTarget: 1800 }),
+    });
+
+    const r = await fetch(`${base}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chapterWordTarget: 0 }),
+    });
+
+    assert.equal(r.status, 400);
+    const body = await r.json();
+    assert.match(body.error, /BAD_CHAPTER_WORD_TARGET/);
+    assert.equal((await store.readConfig()).chapterWordTarget, 1800);
+  });
+});
+
 test('配置文件损坏时返回 JSON 错误，不伪装成默认配置', async () => {
   writeFileSync(join(root, 'config.json'), '{bad json', 'utf8');
 
