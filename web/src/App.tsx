@@ -45,6 +45,29 @@ export function shouldShowFirstRun({ creating, books, shelfError }: {
   return creating || (!shelfError && books.length === 0);
 }
 
+export async function runShelfMutation({
+  action,
+  refresh,
+  onSuccess,
+  onFailure,
+}: {
+  action: () => Promise<unknown>;
+  refresh: () => Promise<BookSummary[] | null>;
+  onSuccess: () => void;
+  onFailure: (e: unknown) => void;
+}) {
+  try {
+    await action();
+    const refreshed = await refresh();
+    if (!refreshed) return false;
+    onSuccess();
+    return true;
+  } catch (e) {
+    onFailure(e);
+    return false;
+  }
+}
+
 export default function App() {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
@@ -103,12 +126,20 @@ export default function App() {
       onOpen={openBook}
       onNew={() => setCreating(true)}
       onRename={async (id, title) => {
-        try { await api.renameBook(id, title); await loadShelf(); toast.success('✓ 已改名'); }
-        catch (e) { toast.error('改名失败：' + messageOf(e)); }
+        await runShelfMutation({
+          action: () => api.renameBook(id, title),
+          refresh: loadShelf,
+          onSuccess: () => toast.success('✓ 已改名'),
+          onFailure: (e) => toast.error('改名失败：' + messageOf(e)),
+        });
       }}
       onDelete={async (id) => {
-        try { await api.deleteBook(id); await loadShelf(); toast.success('✓ 已删除'); }
-        catch (e) { toast.error('删除失败：' + messageOf(e)); }
+        await runShelfMutation({
+          action: () => api.deleteBook(id),
+          refresh: loadShelf,
+          onSuccess: () => toast.success('✓ 已删除'),
+          onFailure: (e) => toast.error('删除失败：' + messageOf(e)),
+        });
       }} />;
   }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { BookSummary } from './types';
-import { loadShelfBooks, shouldShowFirstRun } from './App';
+import { loadShelfBooks, runShelfMutation, shouldShowFirstRun } from './App';
 
 const book = (id: string): BookSummary => ({
   id,
@@ -56,5 +56,49 @@ describe('shelf loading', () => {
       books: [],
       shelfError: null,
     })).toBe(true);
+  });
+
+  it('does not show mutation success when the follow-up shelf refresh failed', async () => {
+    const action = vi.fn(async () => undefined);
+    const refresh = vi.fn(async () => null);
+    const onSuccess = vi.fn();
+    const onFailure = vi.fn();
+
+    const ok = await runShelfMutation({ action, refresh, onSuccess, onFailure });
+
+    expect(ok).toBe(false);
+    expect(action).toHaveBeenCalledOnce();
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it('shows mutation success only after the shelf refresh succeeded', async () => {
+    const books = [book('b1')];
+    const action = vi.fn(async () => undefined);
+    const refresh = vi.fn(async () => books);
+    const onSuccess = vi.fn();
+    const onFailure = vi.fn();
+
+    const ok = await runShelfMutation({ action, refresh, onSuccess, onFailure });
+
+    expect(ok).toBe(true);
+    expect(onSuccess).toHaveBeenCalledOnce();
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it('reports mutation failure without trying to refresh the shelf', async () => {
+    const error = new Error('BAD_TITLE');
+    const action = vi.fn(async () => { throw error; });
+    const refresh = vi.fn(async () => [book('b1')]);
+    const onSuccess = vi.fn();
+    const onFailure = vi.fn();
+
+    const ok = await runShelfMutation({ action, refresh, onSuccess, onFailure });
+
+    expect(ok).toBe(false);
+    expect(refresh).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(onFailure).toHaveBeenCalledWith(error);
   });
 });
