@@ -49,4 +49,19 @@ describe('parseSSELines', () => {
     expect(deltas).toEqual(['半截']);
     expect(errors).toEqual(['生成中断：响应未完成']);
   });
+  it('streamGen 将异步 onDone 失败收敛为 onError', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(
+      'data: {"done":true}\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    )) as unknown as typeof fetch;
+
+    const errors: string[] = [];
+    streamGen('/api/gen/chapter', {}, {
+      onDone: async () => { throw new Error('TREE_RELOAD_FAILED'); },
+      onError: (m) => errors.push(m),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(errors).toEqual(['TREE_RELOAD_FAILED']);
+  });
 });

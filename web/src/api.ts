@@ -38,6 +38,7 @@ export const versionSave = (bookId: string, path: string, text: string) => jpost
 export const rewriteUrl = (bookId: string) => `/api/books/${bookId}/version/rewrite`;
 
 export interface SSEEvent { delta?: string; done?: boolean; error?: string; chapterId?: string; sections?: string; }
+type MaybePromise<T = unknown> = T | Promise<T>;
 
 export function parseSSELines(chunk: string, buffer: string): { events: SSEEvent[]; rest: string } {
   const events: SSEEvent[] = [];
@@ -55,7 +56,11 @@ export function parseSSELines(chunk: string, buffer: string): { events: SSEEvent
 
 export function streamGen(
   path: string, body: unknown,
-  cb: { onDelta?: (d: string) => void; onDone?: (e: SSEEvent) => void; onError?: (m: string) => void }
+  cb: {
+    onDelta?: (d: string) => MaybePromise;
+    onDone?: (e: SSEEvent) => MaybePromise;
+    onError?: (m: string) => MaybePromise;
+  }
 ): () => void {
   const ctrl = new AbortController();
   (async () => {
@@ -76,14 +81,14 @@ export function streamGen(
         const { events, rest } = parseSSELines(dec.decode(value, { stream: true }), buf);
         buf = rest;
         for (const e of events) {
-          if (e.delta) cb.onDelta?.(e.delta);
-          if (e.error) { terminal = true; cb.onError?.(e.error); }
-          if (e.done) { terminal = true; cb.onDone?.(e); }
+          if (e.delta) await cb.onDelta?.(e.delta);
+          if (e.error) { terminal = true; await cb.onError?.(e.error); }
+          if (e.done) { terminal = true; await cb.onDone?.(e); }
         }
       }
-      if (!terminal && !ctrl.signal.aborted) cb.onError?.('生成中断：响应未完成');
+      if (!terminal && !ctrl.signal.aborted) await cb.onError?.('生成中断：响应未完成');
     } catch (err) {
-      if ((err as Error).name !== 'AbortError') cb.onError?.(String((err as Error).message || err));
+      if ((err as Error).name !== 'AbortError') await cb.onError?.(String((err as Error).message || err));
     }
   })();
   return () => ctrl.abort();
