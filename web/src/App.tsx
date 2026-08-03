@@ -12,7 +12,7 @@ import { SettingsPage } from './components/SettingsPage';
 import { FirstRun } from './components/FirstRun';
 import { SectionPlanPanel } from './components/SectionPlanPanel';
 import { Bookshelf } from './components/Bookshelf';
-import { runExclusiveAction } from './asyncAction';
+import { finishOwnedAction, runExclusiveAction, startExclusiveAction } from './asyncAction';
 
 // 顶层视图：书架 / 单本书
 type View = 'shelf' | 'book';
@@ -140,6 +140,8 @@ export default function App() {
   const [planText, setPlanText] = useState('');
   const [planAdopting, setPlanAdopting] = useState(false);
   const abortRef = useRef<null | (() => void)>(null);
+  const streamingRef = useRef(false);
+  const streamingTokenRef = useRef(0);
   const planAdoptingRef = useRef(false);
 
   // 拉取书架列表
@@ -159,8 +161,37 @@ export default function App() {
   const reload = async (bookId: string, sel?: Selection) => {
     const t = await api.getTree(bookId); setTree(t); if (sel) setSelection(sel);
   };
+  const setStreamingRunning = (running: boolean) => {
+    streamingRef.current = running;
+    setStreaming(running);
+    if (!running) {
+      setStreamingPath(null);
+      setStatusText('');
+      abortRef.current = null;
+    }
+  };
+  const finishStreaming = (token?: number) => {
+    if (token === undefined) {
+      setStreamingRunning(false);
+      return true;
+    }
+    return finishOwnedAction({
+      token,
+      currentToken: () => streamingTokenRef.current,
+      finish: () => setStreamingRunning(false),
+    });
+  };
+  const startStreaming = (start: (token: number) => void) => startExclusiveAction({
+    isRunning: () => streamingRef.current,
+    setRunning: setStreamingRunning,
+    start: () => {
+      const token = streamingTokenRef.current + 1;
+      streamingTokenRef.current = token;
+      start(token);
+    },
+  });
   // 返回书架前先停掉任意进行中的流，避免离开后仍有 SSE 回调改状态
-  const goShelf = async () => { if (streaming) stopGen(); setCreating(false); setView('shelf'); await loadShelf(); };
+  const goShelf = async () => { if (streamingRef.current) stopGen(); setCreating(false); setView('shelf'); await loadShelf(); };
 
   if (showSettings) return <SettingsPage onClose={() => setShowSettings(false)} />;
   if (loading) return <div className="boot-skeleton"><div className="sk-line" /><div className="sk-line" /><div className="sk-line short" /></div>;
@@ -222,23 +253,43 @@ export default function App() {
   // 重写分派：章节走 gen/chapter（mode=rewrite）；outline/core 走 version/rewrite
   const doRewrite = (path: string) => {
     const isChapter = path.startsWith('section:');
-    setStreaming(true); setStreamingText(''); setStatusText(stageFor(path));
-    if (isChapter) {
-      setStreamingPath('chapter');
-      const [, sectionId, , chapterId] = path.split(':');
-      abortRef.current = api.streamGen('/api/gen/chapter', { bookId, sectionId, chapterId, mode: 'rewrite' }, {
-        onDelta: (d) => setStreamingText((t) => t + d),
-        onError: (m) => { setStreaming(false); setStreamingPath(null); setStatusText(''); toast.error('生成失败：' + m); },
-        onDone: async () => { setStreaming(false); setStreamingPath(null); setStatusText(''); await reload(bookId, selection); toast.success('✓ 已重写'); },
-      });
-    } else {
-      setStreamingPath(path);
-      abortRef.current = api.streamGen(api.rewriteUrl(bookId), { path }, {
-        onDelta: (d) => setStreamingText((t) => t + d),
-        onError: (m) => { setStreaming(false); setStreamingPath(null); setStatusText(''); toast.error('生成失败：' + m); },
-        onDone: async () => { setStreaming(false); setStreamingPath(null); setStatusText(''); await reload(bookId, selection); toast.success('✓ 已重写'); },
-      });
-    }
+    startStreaming((token) => {
+      setStreamingText(''); setStatusText(stageFor(path));
+      if (isChapter) {
+        setStreamingPath('chapter');
+        const [, sectionId, , chapterId] = path.split(':');
+        abortRef.current = api.streamGen('/api/gen/chapter', { bookId, sectionId, chapterId, mode: 'rewrite' }, {
+          onDelta: (d) => setStreamingText((t) => t + d),
+          onError: (m) => { if (finishStreaming(token)) toast.error('生成失败：' + m); },
+          onDone: async () => {
+            let finished = false;
+            try {
+              await reload(bookId, selection);
+              finished = finishStreaming(token);
+              if (finished) toast.success('✓ 已重写');
+            } finally {
+              if (!finished) finishStreaming(token);
+            }
+          },
+        });
+      } else {
+        setStreamingPath(path);
+        abortRef.current = api.streamGen(api.rewriteUrl(bookId), { path }, {
+          onDelta: (d) => setStreamingText((t) => t + d),
+          onError: (m) => { if (finishStreaming(token)) toast.error('生成失败：' + m); },
+          onDone: async () => {
+            let finished = false;
+            try {
+              await reload(bookId, selection);
+              finished = finishStreaming(token);
+              if (finished) toast.success('✓ 已重写');
+            } finally {
+              if (!finished) finishStreaming(token);
+            }
+          },
+        });
+      }
+    });
   };
 
   // —— 章节推进（下一章 / 抽打）——
@@ -246,26 +297,35 @@ export default function App() {
     const sectionId = selection.kind === 'chapter' ? selection.sectionId : tree.sections[0]?.id;
     if (!sectionId) { toast.error('请先新建一个部'); return; }
     const chapterId = selection.kind === 'chapter' ? selection.chapterId : undefined;
-    setStreaming(true); setStreamingText(''); setStreamingPath('chapter');
-    setStatusText(mode === 'whip' ? '🗯️ 正在按你的要求重写…' : '✍️ 正在写下一章…');
-    abortRef.current = api.streamGen('/api/gen/chapter', { bookId, sectionId, chapterId, mode, whip }, {
-      onDelta: (d) => setStreamingText((t) => t + d),
-      onError: (m) => { setStreaming(false); setStreamingPath(null); setStatusText(''); toast.error('生成失败：' + m); },
-      onDone: async (e) => {
-        setStreaming(false); setStreamingPath(null); setStatusText('');
-        await reload(bookId, { kind: 'chapter', sectionId, chapterId: e.chapterId ?? chapterId! });
-        toast.success('✓ 本章完成');
-      },
+    startStreaming((token) => {
+      setStreamingText(''); setStreamingPath('chapter');
+      setStatusText(mode === 'whip' ? '🗯️ 正在按你的要求重写…' : '✍️ 正在写下一章…');
+      abortRef.current = api.streamGen('/api/gen/chapter', { bookId, sectionId, chapterId, mode, whip }, {
+        onDelta: (d) => setStreamingText((t) => t + d),
+        onError: (m) => { if (finishStreaming(token)) toast.error('生成失败：' + m); },
+        onDone: async (e) => {
+          let finished = false;
+          try {
+            await reload(bookId, { kind: 'chapter', sectionId, chapterId: e.chapterId ?? chapterId! });
+            finished = finishStreaming(token);
+            if (finished) toast.success('✓ 本章完成');
+          } finally {
+            if (!finished) finishStreaming(token);
+          }
+        },
+      });
     });
   };
 
   // AI 规划分部
   const runSections = () => {
-    setPlanOpen(true); setPlanText(''); setStreaming(true); setStatusText('🧩 正在规划分部…');
-    abortRef.current = api.streamGen('/api/gen/sections', { bookId }, {
-      onDelta: (d) => setPlanText((t) => t + d),
-      onError: (m) => { setStreaming(false); setStatusText(''); toast.error('规划失败：' + m); },
-      onDone: (e) => { setStreaming(false); setStatusText(''); if (e.sections) setPlanText(e.sections); },
+    startStreaming((token) => {
+      setPlanOpen(true); setPlanText(''); setStatusText('🧩 正在规划分部…');
+      abortRef.current = api.streamGen('/api/gen/sections', { bookId }, {
+        onDelta: (d) => setPlanText((t) => t + d),
+        onError: (m) => { if (finishStreaming(token)) toast.error('规划失败：' + m); },
+        onDone: (e) => { if (finishStreaming(token) && e.sections) setPlanText(e.sections); },
+      });
     });
   };
   const adoptSections = async (titles: string[]) => {
@@ -284,7 +344,7 @@ export default function App() {
       }),
     });
   };
-  const stopGen = () => { abortRef.current?.(); setStreaming(false); setStreamingPath(null); setStatusText(''); };
+  const stopGen = () => { abortRef.current?.(); finishStreaming(); };
 
   return (
     <div className="app">
@@ -314,7 +374,7 @@ export default function App() {
         </div>
       </div>
       {planOpen && <SectionPlanPanel text={planText} streaming={streaming} adopting={planAdopting}
-        onAdopt={adoptSections} onClose={() => { if (streaming) stopGen(); setPlanOpen(false); }} />}
+        onAdopt={adoptSections} onClose={() => { if (streamingRef.current) stopGen(); setPlanOpen(false); }} />}
     </div>
   );
 }
