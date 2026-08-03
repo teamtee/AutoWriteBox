@@ -1,12 +1,14 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as store from '../store.js';
 
+let root;
 beforeEach(() => {
-  store.setDataRoot(mkdtempSync(join(tmpdir(), 'novelbox-')));
+  root = mkdtempSync(join(tmpdir(), 'novelbox-'));
+  store.setDataRoot(root);
 });
 
 test('createBook 建书并可读回', async () => {
@@ -42,6 +44,16 @@ test('listBooks 按 updatedAt 倒序返回', async () => {
   const recent = await store.createBook({ premise: 'recent' });
   const list = await store.listBooks();
   assert.deepEqual(list.map((b) => b.id), [recent.id, old.id]);
+});
+
+test('listBooks 跳过损坏的书目录，不影响正常书展示', async () => {
+  const ok = await store.createBook({ premise: 'ok', title: '正常书' });
+  const badDir = join(root, 'books', 'book_bad');
+  mkdirSync(badDir, { recursive: true });
+  writeFileSync(join(badDir, 'book.json'), '{ bad json', 'utf8');
+
+  const list = await store.listBooks();
+  assert.deepEqual(list.map((b) => b.id), [ok.id]);
 });
 
 test('readBook 不存在时抛错', async () => {

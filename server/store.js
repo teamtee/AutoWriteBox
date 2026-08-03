@@ -83,6 +83,7 @@ export async function listBooks() {
     } catch (err) {
       if (err.code === 'ENOENT') continue;  // 非书目录（无 book.json）跳过
       if (err.message === 'BAD_ID') continue;  // 非法目录名（如 .DS_Store）跳过
+      if (err instanceof SyntaxError) continue;  // 损坏的书目录跳过，避免拖垮整个书架
       throw err;  // 其余错误上抛
     }
   }
