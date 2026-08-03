@@ -40,6 +40,10 @@ export async function* streamChat({ config, system, messages, signal }) {
     buf = rest;
     for (const d of deltas) yield d;
   }
+  if (buf.trim()) {
+    const { deltas } = parseSSEChunk(`${buf}\n\n`);
+    for (const d of deltas) yield d;
+  }
 }
 
 export async function nonStreamChat({ config, system, messages, signal }) {

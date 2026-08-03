@@ -40,6 +40,29 @@ test('streamChat 将 abort signal 传给 fetch', async () => {
   }
 });
 
+test('streamChat 在响应结束时解析未以空行结尾的最后 SSE 事件', async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(
+      'data: {"choices":[{"delta":{"content":"最后一段"}}]}',
+      { status: 200 },
+    );
+
+    const chunks = [];
+    for await (const d of streamChat({
+      config: { baseUrl: 'https://example.test', model: 'm', apiKey: 'k' },
+      system: 's',
+      messages: [],
+    })) {
+      chunks.push(d);
+    }
+
+    assert.deepEqual(chunks, ['最后一段']);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('extractDigest 直接解析合法 JSON', () => {
   const d = extractDigest('{"summary":"S","progress":"P","newCharacters":[]}');
   assert.equal(d.summary, 'S');
