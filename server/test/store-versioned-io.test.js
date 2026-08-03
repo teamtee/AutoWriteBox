@@ -87,6 +87,32 @@ test('versionSet + versionMove 往返（outline）', async () => {
   assert.equal(store.currentText(b2.outline), '第一版');
 });
 
+test('versionMove outline 到边界时不刷新 updatedAt', async () => {
+  const b = await store.createBook({ premise: 'p' });
+  const before = (await store.readBook(b.id)).updatedAt;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  const vf = await store.versionMove(b.id, 'outline', -1);
+
+  assert.deepEqual(vf, { versions: [''], cursor: 0 });
+  const after = (await store.readBook(b.id)).updatedAt;
+  assert.equal(after, before);
+});
+
+test('versionMove chapter 到边界时不刷新 updatedAt', async () => {
+  const b = await store.createBook({ premise: 'p' });
+  const s = await store.addSection(b.id, {});
+  const c = await store.addChapter(b.id, s.id, {});
+  const before = (await store.readBook(b.id)).updatedAt;
+  await new Promise((resolve) => setTimeout(resolve, 5));
+
+  const vf = await store.versionMove(b.id, `section:${s.id}:chapter:${c.id}`, -1);
+
+  assert.deepEqual(vf, { versions: [''], cursor: 0 });
+  const after = (await store.readBook(b.id)).updatedAt;
+  assert.equal(after, before);
+});
+
 test('并发 versionSet outline 不丢失任何版本', async () => {
   const b = await store.createBook({ premise: 'p' });
 

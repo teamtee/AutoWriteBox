@@ -393,7 +393,7 @@ export async function versionMove(bookId, path, delta) {
   if (p.type === 'chapter') {
     return withStoreLock(bookJsonLockKey(safeBookId), () => withStoreLock(versionLockKey(safeBookId, p), async () => {
       const ch = await readChapter(safeBookId, p.sectionId, p.chapterId);
-      moveCursor(ch.body, delta);
+      if (!moveCursor(ch.body, delta)) return ch.body;
       await writeChapterFile(safeBookId, p.sectionId, p.chapterId, ch);
       await touchBookUnlocked(safeBookId);
       return ch.body;
@@ -402,7 +402,7 @@ export async function versionMove(bookId, path, delta) {
   return withStoreLock(versionLockKey(safeBookId, p), async () => {
     const b = await readBook(safeBookId);
     const vf = p.type === 'outline' ? b.outline : b.settings.core[p.field];
-    moveCursor(vf, delta);
+    if (!moveCursor(vf, delta)) return vf;
     await writeBookUnlocked(safeBookId, b);
     return vf;
   });
