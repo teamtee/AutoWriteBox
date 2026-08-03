@@ -11,9 +11,9 @@ const CORE_FIELDS: { field: 'world' | 'style' | 'constraints' | 'pacing'; label:
 ];
 
 // 主区域：三种视图（全书大纲 / 核心设定 / 章节）统一改用 VersionedBox
-export function MainPanel({ tree, selection, streaming, streamingText, streamingPath, onMove, onRewrite, onClear, onSave, onStop }: {
+export function MainPanel({ tree, selection, streaming, versionBusy = false, streamingText, streamingPath, onMove, onRewrite, onClear, onSave, onStop }: {
   tree: BookTree; selection: Selection;
-  streaming: boolean; streamingText: string; streamingPath: string | null;
+  streaming: boolean; versionBusy?: boolean; streamingText: string; streamingPath: string | null;
   onMove: (path: string, delta: number) => void;
   onRewrite: (path: string) => void;
   onClear: (path: string) => void;
@@ -23,6 +23,7 @@ export function MainPanel({ tree, selection, streaming, streamingText, streaming
   // 把 path 相关的回调打包给 VersionedBox（大纲 / core 使用）
   const boxProps = (path: string) => ({
     streaming: streaming && streamingPath === path,
+    busy: versionBusy,
     streamingText: streaming && streamingPath === path ? streamingText : '',
     onMove: (d: number) => onMove(path, d),
     onRewrite: () => onRewrite(path),
@@ -55,7 +56,7 @@ export function MainPanel({ tree, selection, streaming, streamingText, streaming
   return (
     <main className="main">
       <VersionedBox title={formatIndexedTitle(chapter.index, '章', chapter.title)} versioned={chapter.body} size="lg"
-        streaming={chStreaming} streamingText={chStreaming ? streamingText : ''}
+        streaming={chStreaming} busy={versionBusy} streamingText={chStreaming ? streamingText : ''}
         onMove={(d) => onMove(path, d)} onRewrite={() => onRewrite(path)}
         onClear={() => onClear(path)} onSave={(t) => onSave(path, t)} onStop={onStop} />
     </main>

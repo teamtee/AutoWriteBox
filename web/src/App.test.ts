@@ -4,9 +4,11 @@ import {
   adoptSectionTitles,
   loadShelfBooks,
   runExclusiveStructureMutation,
+  runExclusiveVersionMutation,
   runExclusiveSectionAdoption,
   runShelfMutation,
   shouldDisableSidebar,
+  shouldDisableVersionedBox,
   shouldShowFirstRun,
 } from './App';
 
@@ -266,6 +268,45 @@ describe('book structure mutations', () => {
 
     release();
     await expect(first).resolves.toBe('section-created');
+    expect(setRunning).toHaveBeenNthCalledWith(1, true);
+    expect(setRunning).toHaveBeenLastCalledWith(false);
+    expect(locked).toBe(false);
+  });
+});
+
+describe('version mutations', () => {
+  it('disables versioned boxes while streaming or mutating a versioned field', () => {
+    expect(shouldDisableVersionedBox({ streaming: true, versionMutating: false })).toBe(true);
+    expect(shouldDisableVersionedBox({ streaming: false, versionMutating: true })).toBe(true);
+    expect(shouldDisableVersionedBox({ streaming: false, versionMutating: false })).toBe(false);
+  });
+
+  it('ignores concurrent version mutations while one is running', async () => {
+    let locked = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const task = vi.fn(async () => {
+      await gate;
+      return 'saved';
+    });
+    const setRunning = vi.fn((next: boolean) => { locked = next; });
+
+    const first = runExclusiveVersionMutation({
+      isRunning: () => locked,
+      setRunning,
+      task,
+    });
+    const second = await runExclusiveVersionMutation({
+      isRunning: () => locked,
+      setRunning,
+      task,
+    });
+
+    expect(second).toBeNull();
+    expect(task).toHaveBeenCalledOnce();
+
+    release();
+    await expect(first).resolves.toBe('saved');
     expect(setRunning).toHaveBeenNthCalledWith(1, true);
     expect(setRunning).toHaveBeenLastCalledWith(false);
     expect(locked).toBe(false);

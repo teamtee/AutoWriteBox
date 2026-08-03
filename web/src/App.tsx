@@ -18,6 +18,7 @@ import { finishOwnedAction, runExclusiveAction, startExclusiveAction } from './a
 type View = 'shelf' | 'book';
 export { runExclusiveAction as runExclusiveSectionAdoption } from './asyncAction';
 export { runExclusiveAction as runExclusiveStructureMutation } from './asyncAction';
+export { runExclusiveAction as runExclusiveVersionMutation } from './asyncAction';
 
 const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e);
 
@@ -53,6 +54,13 @@ export function shouldDisableSidebar({ streaming, structureMutating }: {
   structureMutating: boolean;
 }) {
   return streaming || structureMutating;
+}
+
+export function shouldDisableVersionedBox({ streaming, versionMutating }: {
+  streaming: boolean;
+  versionMutating: boolean;
+}) {
+  return streaming || versionMutating;
 }
 
 export async function runShelfMutation({
@@ -148,11 +156,13 @@ export default function App() {
   const [planText, setPlanText] = useState('');
   const [planAdopting, setPlanAdopting] = useState(false);
   const [structureMutating, setStructureMutating] = useState(false);
+  const [versionMutating, setVersionMutating] = useState(false);
   const abortRef = useRef<null | (() => void)>(null);
   const streamingRef = useRef(false);
   const streamingTokenRef = useRef(0);
   const planAdoptingRef = useRef(false);
   const structureMutatingRef = useRef(false);
+  const versionMutatingRef = useRef(false);
 
   // 拉取书架列表
   const loadShelf = async () => loadShelfBooks(
@@ -204,6 +214,10 @@ export default function App() {
     structureMutatingRef.current = running;
     setStructureMutating(running);
   };
+  const setVersionMutationRunning = (running: boolean) => {
+    versionMutatingRef.current = running;
+    setVersionMutating(running);
+  };
   // 返回书架前先停掉任意进行中的流，避免离开后仍有 SSE 回调改状态
   const goShelf = async () => { if (streamingRef.current) stopGen(); setCreating(false); setView('shelf'); await loadShelf(); };
 
@@ -248,16 +262,34 @@ export default function App() {
 
   // —— 统一版本操作 ——
   const doMove = async (path: string, delta: number) => {
-    try { await api.versionMove(bookId, path, delta); await reload(bookId); }
-    catch (e) { toast.error('切换版本失败：' + messageOf(e)); }
+    await runExclusiveAction({
+      isRunning: () => versionMutatingRef.current,
+      setRunning: setVersionMutationRunning,
+      task: async () => {
+        try { await api.versionMove(bookId, path, delta); await reload(bookId); }
+        catch (e) { toast.error('切换版本失败：' + messageOf(e)); }
+      },
+    });
   };
   const doClear = async (path: string) => {
-    try { await api.versionClear(bookId, path); await reload(bookId); toast.info('已清空（可用「上一个」找回）'); }
-    catch (e) { toast.error('清空失败：' + messageOf(e)); }
+    await runExclusiveAction({
+      isRunning: () => versionMutatingRef.current,
+      setRunning: setVersionMutationRunning,
+      task: async () => {
+        try { await api.versionClear(bookId, path); await reload(bookId); toast.info('已清空（可用「上一个」找回）'); }
+        catch (e) { toast.error('清空失败：' + messageOf(e)); }
+      },
+    });
   };
   const doSave = async (path: string, text: string) => {
-    try { await api.versionSave(bookId, path, text); await reload(bookId); toast.success('✓ 已保存'); }
-    catch (e) { toast.error('保存失败：' + messageOf(e)); }
+    await runExclusiveAction({
+      isRunning: () => versionMutatingRef.current,
+      setRunning: setVersionMutationRunning,
+      task: async () => {
+        try { await api.versionSave(bookId, path, text); await reload(bookId); toast.success('✓ 已保存'); }
+        catch (e) { toast.error('保存失败：' + messageOf(e)); }
+      },
+    });
   };
 
   // 状态文案：按 path 前缀区分
@@ -393,7 +425,9 @@ export default function App() {
           onPlanSections={runSections} />
         <div className="content">
           <MainPanel tree={tree} selection={selection}
-            streaming={streaming} streamingText={streamingText} streamingPath={streamingPath}
+            streaming={streaming}
+            versionBusy={shouldDisableVersionedBox({ streaming, versionMutating })}
+            streamingText={streamingText} streamingPath={streamingPath}
             onMove={doMove} onRewrite={doRewrite} onClear={doClear} onSave={doSave} onStop={stopGen} />
           {/* 流式期间由 VersionedBox 工具条负责 Stop，Actions 隐藏避免双 Stop 按钮 */}
           {selection.kind === 'chapter' && !streaming &&
