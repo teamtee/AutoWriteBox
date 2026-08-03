@@ -262,26 +262,36 @@ async function writeChapterFile(bookId, sectionId, chapterId, obj) {
   if (obj.body) obj.content = currentText(obj.body);  // 派生 content 与 body 保持同步
   await atomicWriteJson(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), obj);
 }
-export async function writeChapter(bookId, sectionId, chapterId, obj) {
+async function withChapterWriteLocks(bookId, sectionId, chapterId, fn) {
   const safeBookId = safeId(bookId);
   const safeSectionId = safeId(sectionId);
   const safeChapterId = safeId(chapterId);
-  return withStoreLock(bookJsonLockKey(safeBookId), () =>
-    withStoreLock(chapterFileLockKey(safeBookId, safeSectionId, safeChapterId), async () => {
-      await writeChapterFile(safeBookId, safeSectionId, safeChapterId, obj);
-      await touchBookUnlocked(safeBookId);
-    }));
+  return withStoreLock(sectionFileLockKey(safeBookId, safeSectionId), () =>
+    withStoreLock(bookJsonLockKey(safeBookId), () =>
+      withStoreLock(chapterFileLockKey(safeBookId, safeSectionId, safeChapterId), () =>
+        fn(safeBookId, safeSectionId, safeChapterId))));
+}
+async function assertChapterReferenced(bookId, sectionId, chapterId) {
+  const section = await readSection(bookId, sectionId);
+  if (!(section.chapters || []).includes(chapterId)) throw new Error('CHAPTER_NOT_FOUND');
+}
+export async function writeChapter(bookId, sectionId, chapterId, obj) {
+  return withChapterWriteLocks(bookId, sectionId, chapterId, async (safeBookId, safeSectionId, safeChapterId) => {
+    await assertChapterReferenced(safeBookId, safeSectionId, safeChapterId);
+    await writeChapterFile(safeBookId, safeSectionId, safeChapterId, obj);
+    await touchBookUnlocked(safeBookId);
+  });
 }
 export async function deleteChapter(bookId, sectionId, chapterId) {
   const safeBookId = safeId(bookId);
   const safeSectionId = safeId(sectionId);
   const safeChapterId = safeId(chapterId);
-  return withStoreLock(sectionFileLockKey(safeBookId, safeSectionId), async () => {
+  return withChapterWriteLocks(safeBookId, safeSectionId, safeChapterId, async () => {
     await rm(join(bookDir(safeBookId), safeSectionId, `${safeChapterId}.json`), { force: true });
     const section = await readSection(safeBookId, safeSectionId);
     section.chapters = (section.chapters || []).filter((cid) => cid !== safeChapterId);
     await atomicWriteJson(join(bookDir(safeBookId), safeSectionId, 'section.json'), section);
-    await touchBook(safeBookId);
+    await touchBookUnlocked(safeBookId);
     return section;
   });
 }
@@ -424,13 +434,14 @@ export async function versionMove(bookId, path, delta) {
   const p = parseVersionPath(path);
   const safeBookId = safeId(bookId);
   if (p.type === 'chapter') {
-    return withStoreLock(bookJsonLockKey(safeBookId), () => withStoreLock(versionLockKey(safeBookId, p), async () => {
+    return withChapterWriteLocks(safeBookId, p.sectionId, p.chapterId, async () => {
+      await assertChapterReferenced(safeBookId, p.sectionId, p.chapterId);
       const ch = await readChapter(safeBookId, p.sectionId, p.chapterId);
       if (!moveCursor(ch.body, delta)) return ch.body;
       await writeChapterFile(safeBookId, p.sectionId, p.chapterId, ch);
       await touchBookUnlocked(safeBookId);
       return ch.body;
-    }));
+    });
   }
   return withStoreLock(versionLockKey(safeBookId, p), async () => {
     const b = await readBook(safeBookId);
@@ -444,13 +455,14 @@ export async function versionSet(bookId, path, text) {
   const p = parseVersionPath(path);
   const safeBookId = safeId(bookId);
   if (p.type === 'chapter') {
-    return withStoreLock(bookJsonLockKey(safeBookId), () => withStoreLock(versionLockKey(safeBookId, p), async () => {
+    return withChapterWriteLocks(safeBookId, p.sectionId, p.chapterId, async () => {
+      await assertChapterReferenced(safeBookId, p.sectionId, p.chapterId);
       const ch = await readChapter(safeBookId, p.sectionId, p.chapterId);
       commitVersion(ch.body, text);
       await writeChapterFile(safeBookId, p.sectionId, p.chapterId, ch);
       await touchBookUnlocked(safeBookId);
       return ch.body;
-    }));
+    });
   }
   return withStoreLock(versionLockKey(safeBookId, p), async () => {
     const b = await readBook(safeBookId);

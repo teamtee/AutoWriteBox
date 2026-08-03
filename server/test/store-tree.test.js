@@ -1,13 +1,15 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as store from '../store.js';
 
 let bookId;
+let root;
 beforeEach(async () => {
-  store.setDataRoot(mkdtempSync(join(tmpdir(), 'novelbox-')));
+  root = mkdtempSync(join(tmpdir(), 'novelbox-'));
+  store.setDataRoot(root);
   const b = await store.createBook({ premise: 'p', title: 't' });
   bookId = b.id;
 });
@@ -127,6 +129,22 @@ test('deleteChapter 与 addChapter 并发时不留下悬空章节引用', async 
   const back = await store.readSection(bookId, s.id);
   assert.deepEqual(back.chapters, [added.id]);
   await assert.doesNotReject(() => store.readChapter(bookId, s.id, added.id));
+});
+
+test('deleteChapter 与并发 versionSet 时不留下孤儿章节文件', async () => {
+  const s = await store.addSection(bookId, { title: '起源' });
+  const doomed = await store.addChapter(bookId, s.id, { title: '失败空章' });
+  const path = `section:${s.id}:chapter:${doomed.id}`;
+
+  await Promise.allSettled([
+    store.deleteChapter(bookId, s.id, doomed.id),
+    ...Array.from({ length: 20 }, (_, i) =>
+      store.versionSet(bookId, path, `正文 ${i + 1}`)),
+  ]);
+
+  const back = await store.readSection(bookId, s.id);
+  assert.equal(back.chapters.includes(doomed.id), false);
+  assert.equal(existsSync(join(root, 'books', bookId, s.id, `${doomed.id}.json`)), false);
 });
 
 test('pushHistory（覆盖前存档）与 rollback 还原正文', () => {
