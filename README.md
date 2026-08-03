@@ -38,8 +38,8 @@ npm start       # 启动服务，监听 4399（可用 PORT 覆盖）
 - 所有小说数据保存在项目目录下的 `data/`：
   - `data/config.json`：API 设置（Key 会存到本地）
   - `data/books/<bookId>/`：每本书一个目录
-    - `core.json`：全书大纲/人物/主题
-    - `section-XX/outline.json` + `chapter-XX.json`：分部与章节
+    - `book.json`：全书大纲/设定/人物/部列表
+    - `section-XX/section.json` + `chapter-XX.json`：分部与章节
 - 备份：直接复制 `data/` 目录即可。删除某本书直接删除对应的 `books/<bookId>/` 目录。
 
 ## 常见问题
