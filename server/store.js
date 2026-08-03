@@ -374,7 +374,8 @@ const DEFAULT_CONFIG = { baseUrl: '', model: '', apiKey: '', chapterWordTarget: 
 export async function readConfig() {
   try {
     return { ...DEFAULT_CONFIG, ...JSON.parse(await readFile(configPath(), 'utf8')) };
-  } catch {
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
     return { ...DEFAULT_CONFIG };
   }
 }

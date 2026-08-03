@@ -7,8 +7,10 @@ import * as store from '../store.js';
 import { createApp } from '../index.js';
 
 let base;
+let root;
 beforeEach(() => {
-  store.setDataRoot(mkdtempSync(join(tmpdir(), 'novelbox-')));
+  root = mkdtempSync(join(tmpdir(), 'novelbox-'));
+  store.setDataRoot(root);
 });
 async function withServer(fn) {
   const server = createApp().listen(0);
@@ -66,6 +68,18 @@ test('保存空 API Key 会清除旧 Key', async () => {
 
     const real = await store.readConfig();
     assert.equal(real.apiKey, '');
+  });
+});
+
+test('配置文件损坏时返回 JSON 错误，不伪装成默认配置', async () => {
+  writeFileSync(join(root, 'config.json'), '{bad json', 'utf8');
+
+  await withServer(async () => {
+    const r = await fetch(`${base}/api/config`);
+
+    assert.equal(r.status, 400);
+    const body = await r.json();
+    assert.match(body.error, /JSON|Unexpected/);
   });
 });
 
