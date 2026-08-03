@@ -122,6 +122,31 @@ test('非字符串配置字段返回 JSON 错误且不覆盖旧值', async () =>
   });
 });
 
+test('配置请求体必须是普通对象，不接受数组污染配置文件', async () => {
+  await withServer(async () => {
+    await fetch(`${base}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: 'https://x/v1', model: 'm', apiKey: 'sk-real' }),
+    });
+
+    const r = await fetch(`${base}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(['polluted']),
+    });
+
+    assert.equal(r.status, 400);
+    const body = await r.json();
+    assert.match(body.error, /BAD_CONFIG_PATCH/);
+    const real = await store.readConfig();
+    assert.equal(Object.hasOwn(real, '0'), false);
+    assert.equal(real.baseUrl, 'https://x/v1');
+    assert.equal(real.model, 'm');
+    assert.equal(real.apiKey, 'sk-real');
+  });
+});
+
 test('配置文件损坏时返回 JSON 错误，不伪装成默认配置', async () => {
   writeFileSync(join(root, 'config.json'), '{bad json', 'utf8');
 

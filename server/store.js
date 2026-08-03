@@ -378,6 +378,9 @@ export async function readConfig() {
   }
 }
 export async function writeConfig(patch) {
+  if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
+    throw new Error('BAD_CONFIG_PATCH');
+  }
   return withStoreLock(configLockKey(), async () => {
     const cur = await readConfig();
     for (const field of ['baseUrl', 'model', 'apiKey']) {
