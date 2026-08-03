@@ -190,6 +190,24 @@ test('读取配置时忽略磁盘里的未知字段', async () => {
   });
 });
 
+test('读取配置时丢弃磁盘里类型非法的已知字段', async () => {
+  writeFileSync(join(root, 'config.json'), JSON.stringify({
+    baseUrl: { bad: 'object' },
+    model: ['bad'],
+    apiKey: 123,
+    chapterWordTarget: 'bad',
+  }), 'utf8');
+
+  await withServer(async () => {
+    const cfg = await (await fetch(`${base}/api/config`)).json();
+
+    assert.equal(cfg.baseUrl, '');
+    assert.equal(cfg.model, '');
+    assert.equal(cfg.apiKey, '');
+    assert.equal(cfg.chapterWordTarget, 2000);
+  });
+});
+
 test('请求体 JSON 损坏时返回 JSON 错误，不返回默认 HTML 错误页', async () => {
   await withServer(async () => {
     const r = await fetch(`${base}/api/config`, {

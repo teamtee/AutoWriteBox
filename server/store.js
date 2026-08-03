@@ -373,8 +373,11 @@ const CONFIG_FIELD_SET = new Set(CONFIG_FIELDS);
 
 function normalizeConfig(config) {
   const out = { ...DEFAULT_CONFIG };
-  for (const field of CONFIG_FIELDS) {
-    if (config?.[field] !== undefined) out[field] = config[field];
+  for (const field of ['baseUrl', 'model', 'apiKey']) {
+    if (typeof config?.[field] === 'string') out[field] = config[field];
+  }
+  if (Number.isFinite(config?.chapterWordTarget) && config.chapterWordTarget > 0) {
+    out.chapterWordTarget = config.chapterWordTarget;
   }
   return out;
 }
