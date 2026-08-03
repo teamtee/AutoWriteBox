@@ -216,6 +216,18 @@ export async function writeSection(bookId, sectionId, obj, { preserveExistingCha
     await touchBook(safeBookId);
   });
 }
+export async function removeChapterReference(bookId, sectionId, chapterId) {
+  const safeBookId = safeId(bookId);
+  const safeSectionId = safeId(sectionId);
+  const safeChapterId = safeId(chapterId);
+  return withStoreLock(sectionFileLockKey(safeBookId, safeSectionId), async () => {
+    const section = await readSection(safeBookId, safeSectionId);
+    section.chapters = (section.chapters || []).filter((cid) => cid !== safeChapterId);
+    await atomicWriteJson(join(bookDir(safeBookId), safeSectionId, 'section.json'), section);
+    await touchBook(safeBookId);
+    return section;
+  });
+}
 
 // ——— chapter ———
 export async function addChapter(bookId, sectionId, { title } = {}) {

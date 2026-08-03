@@ -104,6 +104,17 @@ test('旧 section 快照写回摘要时不覆盖期间新增的章节列表', as
   assert.deepEqual(back.chapters, [c.id]);
 });
 
+test('removeChapterReference 只删除目标章节引用', async () => {
+  const s = await store.addSection(bookId, { title: '起源' });
+  const c1 = await store.addChapter(bookId, s.id, { title: '第一章' });
+  const c2 = await store.addChapter(bookId, s.id, { title: '第二章' });
+
+  await store.removeChapterReference(bookId, s.id, c1.id);
+
+  const back = await store.readSection(bookId, s.id);
+  assert.deepEqual(back.chapters, [c2.id]);
+});
+
 test('pushHistory（覆盖前存档）与 rollback 还原正文', () => {
   const ch = { content: '第一版', history: [] };
   // 约定：先存档当前值，再改写

@@ -196,9 +196,7 @@ export function mountGenRoutes(app, deps = {}) {
       // 空章回滚：mode==='next' 新建了章，但正文从未成功写入，则从 section.chapters 中移除
       if (mode === 'next' && createdChapterId && !full) {
         try {
-          const sec = await store.readSection(bookId, sectionId);
-          sec.chapters = sec.chapters.filter((cid) => cid !== createdChapterId);
-          await store.writeSection(bookId, sectionId, sec, { preserveExistingChapters: false });
+          await store.removeChapterReference(bookId, sectionId, createdChapterId);
           await store.deleteChapterFile(bookId, sectionId, createdChapterId);
         } catch { /* 回滚失败不再二次抛错 */ }
       }
