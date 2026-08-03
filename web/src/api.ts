@@ -86,6 +86,14 @@ export function streamGen(
           if (e.done) { terminal = true; await cb.onDone?.(e); }
         }
       }
+      if (buf.trim()) {
+        const { events } = parseSSELines('\n\n', buf);
+        for (const e of events) {
+          if (e.delta) await cb.onDelta?.(e.delta);
+          if (e.error) { terminal = true; await cb.onError?.(e.error); }
+          if (e.done) { terminal = true; await cb.onDone?.(e); }
+        }
+      }
       if (!terminal && !ctrl.signal.aborted) await cb.onError?.('生成中断：响应未完成');
     } catch (err) {
       if ((err as Error).name !== 'AbortError') await cb.onError?.(String((err as Error).message || err));

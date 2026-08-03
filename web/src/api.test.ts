@@ -49,6 +49,23 @@ describe('parseSSELines', () => {
     expect(deltas).toEqual(['半截']);
     expect(errors).toEqual(['生成中断：响应未完成']);
   });
+  it('streamGen 在响应结束时解析未以空行结尾的终止事件', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(
+      'data: {"done":true}',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    )) as unknown as typeof fetch;
+
+    const dones: boolean[] = [];
+    const errors: string[] = [];
+    streamGen('/api/gen/chapter', {}, {
+      onDone: (e) => dones.push(Boolean(e.done)),
+      onError: (m) => errors.push(m),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(dones).toEqual([true]);
+    expect(errors).toEqual([]);
+  });
   it('streamGen 将异步 onDone 失败收敛为 onError', async () => {
     globalThis.fetch = vi.fn(async () => new Response(
       'data: {"done":true}\n\n',
