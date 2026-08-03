@@ -7,7 +7,8 @@ import * as store from '../store.js';
 import { createApp } from '../index.js';
 
 let base;
-beforeEach(() => { store.setDataRoot(mkdtempSync(join(tmpdir(), 'novelbox-'))); });
+let root;
+beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'novelbox-')); store.setDataRoot(root); });
 async function withServer(fn) {
   const server = createApp().listen(0);
   base = `http://127.0.0.1:${server.address().port}`;
@@ -95,6 +96,22 @@ test('给不存在的书加部返回 JSON 错误，不退出服务', async () =>
 
     const health = await j(await fetch(`${base}/api/health`));
     assert.equal(health.ok, true);
+  });
+});
+
+test('读取书树时章节损坏返回真实 JSON 错误，不误报书不存在', async () => {
+  await withServer(async () => {
+    const book = await j(await post('/api/books', { premise: 'p', title: '书' }));
+    const s = await j(await post(`/api/books/${book.id}/sections`, { title: '第一部' }));
+    const c = await j(await post(`/api/books/${book.id}/sections/${s.id}/chapters`, { title: '第一章' }));
+    writeFileSync(join(root, 'books', book.id, s.id, `${c.id}.json`), '{bad json', 'utf8');
+
+    const r = await fetch(`${base}/api/books/${book.id}/tree`);
+
+    assert.equal(r.status, 400);
+    const body = await j(r);
+    assert.notEqual(body.error, 'BOOK_NOT_FOUND');
+    assert.match(body.error, /JSON|Unexpected/);
   });
 });
 

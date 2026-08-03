@@ -25,7 +25,11 @@ export function mountBookRoutes(app) {
         sections.push({ ...section, chapters });
       }
       res.json({ book, sections });
-    } catch { res.status(404).json({ error: 'BOOK_NOT_FOUND' }); }
+    } catch (e) {
+      const message = String(e.message || e);
+      const status = message === 'BOOK_NOT_FOUND' ? 404 : 400;
+      res.status(status).json({ error: message });
+    }
   });
 
   app.post('/api/books/:id/sections', async (req, res) => {
