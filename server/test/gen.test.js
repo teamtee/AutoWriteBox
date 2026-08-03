@@ -400,6 +400,37 @@ test('gen/chapter whip 把当前章原文交给 LLM 参考', async () => {
   }, whipDeps);
 });
 
+test('gen/chapter 非法 mode 返回错误且不写入章节版本', async () => {
+  const deps = {
+    async *streamChat() { yield '非法生成正文'; },
+    async nonStreamChat() {
+      return JSON.stringify({ summary: '不应写入', progress: '不应写入', newCharacters: [] });
+    },
+  };
+
+  await withServer(async () => {
+    const book = await store.createBook({ premise: 'p' });
+    const s = await store.addSection(book.id, {});
+    const c = await store.addChapter(book.id, s.id, {});
+    await store.versionSet(book.id, `section:${s.id}:chapter:${c.id}`, '原正文');
+
+    const res = await post('/api/gen/chapter', {
+      bookId: book.id,
+      sectionId: s.id,
+      chapterId: c.id,
+      mode: 'evil',
+    });
+    const sse = await readSSE(res);
+
+    assert.match(sse, /"error"/);
+    assert.match(sse, /BAD_MODE/);
+    const ch = await store.readChapter(book.id, s.id, c.id);
+    assert.deepEqual(ch.body.versions, ['', '原正文']);
+    assert.equal(store.currentText(ch.body), '原正文');
+    assert.equal(ch.summary, '');
+  }, deps);
+});
+
 test('version/rewrite path=outline 流式生成后写入 book.outline（版本化）', async () => {
   await withServer(async () => {
     const book = await j(await post('/api/books', { premise: '写侦探故事' }));

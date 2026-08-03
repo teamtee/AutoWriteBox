@@ -120,6 +120,7 @@ export function mountGenRoutes(app, deps = {}) {
     let createdChapterId = null;  // mode==='next' 时新建的空章，失败要回滚
     let full = '';
     try {
+      if (!['next', 'rewrite', 'whip'].includes(mode)) throw new Error('BAD_MODE');
       const config = await store.readConfig();
       const book = await store.readBook(bookId);
       const section = await store.readSection(bookId, sectionId);
