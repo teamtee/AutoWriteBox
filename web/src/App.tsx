@@ -316,14 +316,8 @@ export default function App() {
           onDelta: (d) => setStreamingText((t) => t + d),
           onError: (m) => { if (finishStreaming(token)) toast.error('生成失败：' + m); },
           onDone: async () => {
-            let finished = false;
-            try {
-              await reload(bookId, selection);
-              finished = finishStreaming(token);
-              if (finished) toast.success('✓ 已重写');
-            } finally {
-              if (!finished) finishStreaming(token);
-            }
+            try { await reload(bookId, selection); } catch { /* 刷新失败不影响成功提示 */ }
+            if (finishStreaming(token)) toast.success('✓ 已重写');
           },
         });
       } else {
@@ -332,14 +326,8 @@ export default function App() {
           onDelta: (d) => setStreamingText((t) => t + d),
           onError: (m) => { if (finishStreaming(token)) toast.error('生成失败：' + m); },
           onDone: async () => {
-            let finished = false;
-            try {
-              await reload(bookId, selection);
-              finished = finishStreaming(token);
-              if (finished) toast.success('✓ 已重写');
-            } finally {
-              if (!finished) finishStreaming(token);
-            }
+            try { await reload(bookId, selection); } catch { /* 刷新失败不影响成功提示 */ }
+            if (finishStreaming(token)) toast.success('✓ 已重写');
           },
         });
       }
@@ -358,14 +346,8 @@ export default function App() {
         onDelta: (d) => setStreamingText((t) => t + d),
         onError: (m) => { if (finishStreaming(token)) toast.error('生成失败：' + m); },
         onDone: async (e) => {
-          let finished = false;
-          try {
-            await reload(bookId, { kind: 'chapter', sectionId, chapterId: e.chapterId ?? chapterId! });
-            finished = finishStreaming(token);
-            if (finished) toast.success('✓ 本章完成');
-          } finally {
-            if (!finished) finishStreaming(token);
-          }
+          try { await reload(bookId, { kind: 'chapter', sectionId, chapterId: e.chapterId ?? chapterId! }); } catch { /* 刷新失败不影响成功提示 */ }
+          if (finishStreaming(token)) toast.success('✓ 本章完成');
         },
       });
     });
@@ -413,8 +395,10 @@ export default function App() {
               isRunning: () => structureMutatingRef.current,
               setRunning: setStructureMutationRunning,
               task: async () => {
-                try { await api.addSection(bookId); await reload(bookId); }
-                catch (e) { toast.error('新建部失败：' + messageOf(e)); }
+                try { await api.addSection(bookId); }
+                catch (e) { toast.error('新建部失败：' + messageOf(e)); return; }
+                try { await reload(bookId); }
+                catch { toast.error('刷新数据失败'); }
               },
             });
           }}
@@ -423,10 +407,11 @@ export default function App() {
               isRunning: () => structureMutatingRef.current,
               setRunning: setStructureMutationRunning,
               task: async () => {
-                try {
-                  const c = await api.addChapter(bookId, sid);
-                  await reload(bookId, { kind: 'chapter', sectionId: sid, chapterId: c.id });
-                } catch (e) { toast.error('新建章失败：' + messageOf(e)); }
+                let c;
+                try { c = await api.addChapter(bookId, sid); }
+                catch (e) { toast.error('新建章失败：' + messageOf(e)); return; }
+                try { await reload(bookId, { kind: 'chapter', sectionId: sid, chapterId: c.id }); }
+                catch { toast.error('刷新数据失败'); }
               },
             });
           }}
