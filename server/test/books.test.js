@@ -78,6 +78,25 @@ test('version/move 非法 delta 返回 JSON 错误，不静默当作 0', async (
   });
 });
 
+test('version/save 非字符串 text 返回 JSON 错误且不污染版本链', async () => {
+  await withServer(async () => {
+    const book = await j(await post('/api/books', { premise: 'p' }));
+    const s = await j(await post(`/api/books/${book.id}/sections`, {}));
+    const c = await j(await post(`/api/books/${book.id}/sections/${s.id}/chapters`, {}));
+    const path = `section:${s.id}:chapter:${c.id}`;
+    await post(`/api/books/${book.id}/version/save`, { path, text: '原正文' });
+
+    const r = await post(`/api/books/${book.id}/version/save`, { path, text: { bad: 'object' } });
+
+    assert.equal(r.status, 400);
+    const body = await j(r);
+    assert.match(body.error, /BAD_TEXT/);
+    const ch = await store.readChapter(book.id, s.id, c.id);
+    assert.deepEqual(ch.body.versions, ['', '原正文']);
+    assert.equal(store.currentText(ch.body), '原正文');
+  });
+});
+
 test('DELETE 删书 / PATCH 改名', async () => {
   await withServer(async () => {
     const book = await j(await post('/api/books', { premise: 'p', title: 'A' }));

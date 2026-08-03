@@ -60,7 +60,11 @@ export function mountBookRoutes(app) {
     catch (e) { res.status(400).json({ error: String(e.message || e) }); }
   });
   app.post('/api/books/:id/version/save', async (req, res) => {
-    try { res.json(await store.versionSet(req.params.id, req.body?.path, req.body?.text ?? '')); }
+    try {
+      const text = req.body?.text ?? '';
+      if (typeof text !== 'string') throw new Error('BAD_TEXT');
+      res.json(await store.versionSet(req.params.id, req.body?.path, text));
+    }
     catch (e) { res.status(400).json({ error: String(e.message || e) }); }
   });
 
