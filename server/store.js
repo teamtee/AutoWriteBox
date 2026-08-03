@@ -273,7 +273,7 @@ export async function readConfig() {
 export async function writeConfig(patch) {
   const cur = await readConfig();
   const next = { ...cur, ...patch };
-  if (!patch.apiKey || patch.apiKey === 'sk-****') next.apiKey = cur.apiKey;  // 保留原 Key
+  if (patch.apiKey === undefined || patch.apiKey === 'sk-****') next.apiKey = cur.apiKey;  // 保留原 Key
   await mkdir(DATA_ROOT, { recursive: true });
   await atomicWriteJson(configPath(), next);
   return next;

@@ -41,6 +41,21 @@ test('掩码 Key 再次保存不覆盖真实 Key', async () => {
   });
 });
 
+test('保存空 API Key 会清除旧 Key', async () => {
+  await withServer(async () => {
+    await fetch(`${base}/api/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: 'sk-real' }) });
+    const cleared = await (await fetch(`${base}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: '' }),
+    })).json();
+    assert.equal(cleared.apiKey, '');
+
+    const real = await store.readConfig();
+    assert.equal(real.apiKey, '');
+  });
+});
+
 test('配置保存失败返回 JSON 错误，不挂住请求', async () => {
   const rootFile = join(mkdtempSync(join(tmpdir(), 'novelbox-config-')), 'not-a-dir');
   writeFileSync(rootFile, 'x');
