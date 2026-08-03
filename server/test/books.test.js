@@ -77,3 +77,23 @@ test('DELETE 删书 / PATCH 改名', async () => {
     assert.equal(list.find((x) => x.id === book.id), undefined);
   });
 });
+
+test('给不存在的书加部返回 JSON 错误，不退出服务', async () => {
+  await withServer(async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1000);
+    const r = await fetch(`${base}/api/books/missing/sections`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    assert.equal(r.status, 400);
+    const body = await j(r);
+    assert.match(body.error, /BOOK_NOT_FOUND/);
+
+    const health = await j(await fetch(`${base}/api/health`));
+    assert.equal(health.ok, true);
+  });
+});

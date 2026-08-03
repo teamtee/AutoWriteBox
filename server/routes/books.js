@@ -24,14 +24,17 @@ export function mountBookRoutes(app) {
   });
 
   app.post('/api/books/:id/sections', async (req, res) => {
-    res.json(await store.addSection(req.params.id, {
-      title: req.body?.title,
-      titleSource: req.body?.titleSource,
-    }));
+    try {
+      res.json(await store.addSection(req.params.id, {
+        title: req.body?.title,
+        titleSource: req.body?.titleSource,
+      }));
+    } catch (e) { res.status(400).json({ error: String(e.message || e) }); }
   });
 
   app.post('/api/books/:id/sections/:sid/chapters', async (req, res) => {
-    res.json(await store.addChapter(req.params.id, req.params.sid, { title: req.body?.title }));
+    try { res.json(await store.addChapter(req.params.id, req.params.sid, { title: req.body?.title })); }
+    catch (e) { res.status(400).json({ error: String(e.message || e) }); }
   });
 
   // ——— 统一版本操作 ———
