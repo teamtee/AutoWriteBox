@@ -4,10 +4,13 @@ const mask = (cfg) => ({ ...cfg, apiKey: cfg.apiKey ? 'sk-****' : '' });
 
 export function mountConfigRoutes(app) {
   app.get('/api/config', async (req, res) => {
-    res.json(mask(await readConfig()));
+    try { res.json(mask(await readConfig())); }
+    catch (e) { res.status(400).json({ error: String(e.message || e) }); }
   });
   app.post('/api/config', async (req, res) => {
-    const saved = await writeConfig(req.body || {});
-    res.json(mask(saved));
+    try {
+      const saved = await writeConfig(req.body || {});
+      res.json(mask(saved));
+    } catch (e) { res.status(400).json({ error: String(e.message || e) }); }
   });
 }

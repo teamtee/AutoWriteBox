@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as store from '../store.js';
@@ -38,5 +38,25 @@ test('掩码 Key 再次保存不覆盖真实 Key', async () => {
     const real = await store.readConfig();
     assert.equal(real.apiKey, 'sk-real');
     assert.equal(real.model, 'm2');
+  });
+});
+
+test('配置保存失败返回 JSON 错误，不挂住请求', async () => {
+  const rootFile = join(mkdtempSync(join(tmpdir(), 'novelbox-config-')), 'not-a-dir');
+  writeFileSync(rootFile, 'x');
+  store.setDataRoot(rootFile);
+  await withServer(async () => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1000);
+    const r = await fetch(`${base}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'm' }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    assert.equal(r.status, 400);
+    const body = await r.json();
+    assert.match(body.error, /EEXIST|ENOTDIR/);
   });
 });
