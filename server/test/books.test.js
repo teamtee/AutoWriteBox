@@ -65,6 +65,19 @@ test('非法 path 返回 400', async () => {
   });
 });
 
+test('version/move 非法 delta 返回 JSON 错误，不静默当作 0', async () => {
+  await withServer(async () => {
+    const book = await j(await post('/api/books', { premise: 'p' }));
+    for (const delta of ['abc', null, 0, 2]) {
+      const r = await post(`/api/books/${book.id}/version/move`, { path: 'outline', delta });
+
+      assert.equal(r.status, 400);
+      const body = await j(r);
+      assert.match(body.error, /BAD_DELTA/);
+    }
+  });
+});
+
 test('DELETE 删书 / PATCH 改名', async () => {
   await withServer(async () => {
     const book = await j(await post('/api/books', { premise: 'p', title: 'A' }));

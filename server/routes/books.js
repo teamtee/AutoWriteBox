@@ -49,7 +49,9 @@ export function mountBookRoutes(app) {
   // ——— 统一版本操作 ———
   app.post('/api/books/:id/version/move', async (req, res) => {
     try {
-      const vf = await store.versionMove(req.params.id, req.body?.path, Number(req.body?.delta) || 0);
+      const delta = req.body?.delta;
+      if (delta !== -1 && delta !== 1) throw new Error('BAD_DELTA');
+      const vf = await store.versionMove(req.params.id, req.body?.path, delta);
       res.json(vf);
     } catch (e) { res.status(400).json({ error: String(e.message || e) }); }
   });
