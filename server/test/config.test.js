@@ -147,6 +147,49 @@ test('配置请求体必须是普通对象，不接受数组污染配置文件',
   });
 });
 
+test('未知配置字段返回 JSON 错误且不污染配置文件', async () => {
+  await withServer(async () => {
+    await fetch(`${base}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ baseUrl: 'https://x/v1', model: 'm', apiKey: 'sk-real' }),
+    });
+
+    const r = await fetch(`${base}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ extra: 'polluted' }),
+    });
+
+    assert.equal(r.status, 400);
+    const body = await r.json();
+    assert.match(body.error, /BAD_CONFIG_FIELD/);
+    const real = await store.readConfig();
+    assert.equal(Object.hasOwn(real, 'extra'), false);
+    assert.equal(real.baseUrl, 'https://x/v1');
+    assert.equal(real.model, 'm');
+    assert.equal(real.apiKey, 'sk-real');
+  });
+});
+
+test('读取配置时忽略磁盘里的未知字段', async () => {
+  writeFileSync(join(root, 'config.json'), JSON.stringify({
+    baseUrl: 'https://x/v1',
+    model: 'm',
+    apiKey: 'sk-real',
+    extra: 'polluted',
+  }), 'utf8');
+
+  await withServer(async () => {
+    const cfg = await (await fetch(`${base}/api/config`)).json();
+
+    assert.equal(Object.hasOwn(cfg, 'extra'), false);
+    assert.equal(cfg.baseUrl, 'https://x/v1');
+    assert.equal(cfg.model, 'm');
+    assert.equal(cfg.apiKey, 'sk-****');
+  });
+});
+
 test('请求体 JSON 损坏时返回 JSON 错误，不返回默认 HTML 错误页', async () => {
   await withServer(async () => {
     const r = await fetch(`${base}/api/config`, {

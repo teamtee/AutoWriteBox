@@ -368,10 +368,20 @@ export function rollback(obj, field) {
 const configPath = () => join(DATA_ROOT, 'config.json');
 const configLockKey = () => 'config:config-json';
 const DEFAULT_CONFIG = { baseUrl: '', model: '', apiKey: '', chapterWordTarget: 2000 };
+const CONFIG_FIELDS = Object.keys(DEFAULT_CONFIG);
+const CONFIG_FIELD_SET = new Set(CONFIG_FIELDS);
+
+function normalizeConfig(config) {
+  const out = { ...DEFAULT_CONFIG };
+  for (const field of CONFIG_FIELDS) {
+    if (config?.[field] !== undefined) out[field] = config[field];
+  }
+  return out;
+}
 
 export async function readConfig() {
   try {
-    return { ...DEFAULT_CONFIG, ...JSON.parse(await readFile(configPath(), 'utf8')) };
+    return normalizeConfig(JSON.parse(await readFile(configPath(), 'utf8')));
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
     return { ...DEFAULT_CONFIG };
@@ -380,6 +390,9 @@ export async function readConfig() {
 export async function writeConfig(patch) {
   if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) {
     throw new Error('BAD_CONFIG_PATCH');
+  }
+  for (const field of Object.keys(patch)) {
+    if (!CONFIG_FIELD_SET.has(field)) throw new Error('BAD_CONFIG_FIELD');
   }
   return withStoreLock(configLockKey(), async () => {
     const cur = await readConfig();
