@@ -29,6 +29,18 @@ test('建书→加部→加章→读全树', async () => {
   });
 });
 
+test('建书 premise 必须是非空字符串，不接受数组污染书架', async () => {
+  await withServer(async () => {
+    const r = await post('/api/books', { premise: [] });
+
+    assert.equal(r.status, 400);
+    const body = await j(r);
+    assert.match(body.error, /BAD_PREMISE|PREMISE_REQUIRED/);
+    const list = await j(await fetch(`${base}/api/books`));
+    assert.deepEqual(list, []);
+  });
+});
+
 test('版本 save 入链，move 双向浏览', async () => {
   await withServer(async () => {
     const book = await j(await post('/api/books', { premise: 'p' }));

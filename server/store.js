@@ -56,6 +56,7 @@ function emptyCore() {
 }
 
 export async function createBook({ premise, title }) {
+  if (typeof premise !== 'string' || !premise.trim()) throw new Error('BAD_PREMISE');
   // 时间戳（毫秒）+ 4 位随机后缀，避免同毫秒建书撞 id
   const ts = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 17);
   const id = 'book_' + ts + '_' + Math.random().toString(36).slice(2, 6);
