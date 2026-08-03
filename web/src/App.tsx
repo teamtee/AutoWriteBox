@@ -18,11 +18,39 @@ type View = 'shelf' | 'book';
 
 const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e);
 
+export async function loadShelfBooks(
+  listBooks: () => Promise<BookSummary[]>,
+  setBooks: (books: BookSummary[]) => void,
+  setShelfError: (message: string | null) => void,
+  onError?: (message: string) => void,
+) {
+  try {
+    const list = await listBooks();
+    setBooks(list);
+    setShelfError(null);
+    return list;
+  } catch (e) {
+    const message = messageOf(e);
+    setShelfError(message);
+    onError?.(message);
+    return null;
+  }
+}
+
+export function shouldShowFirstRun({ creating, books, shelfError }: {
+  creating: boolean;
+  books: BookSummary[];
+  shelfError: string | null;
+}) {
+  return creating || (!shelfError && books.length === 0);
+}
+
 export default function App() {
   const toast = useToast();
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<View>('shelf');
   const [books, setBooks] = useState<BookSummary[]>([]);
+  const [shelfError, setShelfError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [tree, setTree] = useState<BookTree | null>(null);
   const [selection, setSelection] = useState<Selection>({ kind: 'outline' });
@@ -37,7 +65,12 @@ export default function App() {
   const abortRef = useRef<null | (() => void)>(null);
 
   // 拉取书架列表
-  const loadShelf = async () => { const list = await api.listBooks(); setBooks(list); return list; };
+  const loadShelf = async () => loadShelfBooks(
+    api.listBooks,
+    setBooks,
+    setShelfError,
+    (message) => toast.error('加载书架失败：' + message),
+  );
   useEffect(() => { loadShelf().finally(() => setLoading(false)); }, []);
 
   const openBook = async (id: string) => {
@@ -49,14 +82,21 @@ export default function App() {
     const t = await api.getTree(bookId); setTree(t); if (sel) setSelection(sel);
   };
   // 返回书架前先停掉任意进行中的流，避免离开后仍有 SSE 回调改状态
-  const goShelf = async () => { if (streaming) stopGen(); setView('shelf'); await loadShelf(); };
+  const goShelf = async () => { if (streaming) stopGen(); setCreating(false); setView('shelf'); await loadShelf(); };
 
   if (showSettings) return <SettingsPage onClose={() => setShowSettings(false)} />;
   if (loading) return <div className="boot-skeleton"><div className="sk-line" /><div className="sk-line" /><div className="sk-line short" /></div>;
 
   // 书架视图：空书架或点了「新建」都落到 FirstRun
   if (view === 'shelf') {
-    if (creating || books.length === 0) {
+    if (shelfError && !creating) {
+      return <div className="empty-hint big">
+        <h1>书架加载失败</h1>
+        <p>无法确认当前是否已有作品，请重试后再新建。</p>
+        <button className="hbtn" onClick={() => { void loadShelf(); }}>重试</button>
+      </div>;
+    }
+    if (shouldShowFirstRun({ creating, books, shelfError })) {
       return <FirstRun onCreated={async (b: Book) => { setCreating(false); await openBook(b.id); }} />;
     }
     return <Bookshelf books={books}
