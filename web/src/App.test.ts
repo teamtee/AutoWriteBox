@@ -3,8 +3,10 @@ import type { BookSummary } from './types';
 import {
   adoptSectionTitles,
   loadShelfBooks,
+  runExclusiveStructureMutation,
   runExclusiveSectionAdoption,
   runShelfMutation,
+  shouldDisableSidebar,
   shouldShowFirstRun,
 } from './App';
 
@@ -225,6 +227,45 @@ describe('section adoption', () => {
 
     release();
     await expect(first).resolves.toBe('created');
+    expect(setRunning).toHaveBeenNthCalledWith(1, true);
+    expect(setRunning).toHaveBeenLastCalledWith(false);
+    expect(locked).toBe(false);
+  });
+});
+
+describe('book structure mutations', () => {
+  it('disables the sidebar while streaming or mutating the book structure', () => {
+    expect(shouldDisableSidebar({ streaming: true, structureMutating: false })).toBe(true);
+    expect(shouldDisableSidebar({ streaming: false, structureMutating: true })).toBe(true);
+    expect(shouldDisableSidebar({ streaming: false, structureMutating: false })).toBe(false);
+  });
+
+  it('ignores concurrent structure mutations while one is running', async () => {
+    let locked = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const task = vi.fn(async () => {
+      await gate;
+      return 'section-created';
+    });
+    const setRunning = vi.fn((next: boolean) => { locked = next; });
+
+    const first = runExclusiveStructureMutation({
+      isRunning: () => locked,
+      setRunning,
+      task,
+    });
+    const second = await runExclusiveStructureMutation({
+      isRunning: () => locked,
+      setRunning,
+      task,
+    });
+
+    expect(second).toBeNull();
+    expect(task).toHaveBeenCalledOnce();
+
+    release();
+    await expect(first).resolves.toBe('section-created');
     expect(setRunning).toHaveBeenNthCalledWith(1, true);
     expect(setRunning).toHaveBeenLastCalledWith(false);
     expect(locked).toBe(false);

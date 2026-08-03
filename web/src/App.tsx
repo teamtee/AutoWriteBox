@@ -17,6 +17,7 @@ import { finishOwnedAction, runExclusiveAction, startExclusiveAction } from './a
 // 顶层视图：书架 / 单本书
 type View = 'shelf' | 'book';
 export { runExclusiveAction as runExclusiveSectionAdoption } from './asyncAction';
+export { runExclusiveAction as runExclusiveStructureMutation } from './asyncAction';
 
 const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e);
 
@@ -45,6 +46,13 @@ export function shouldShowFirstRun({ creating, books, shelfError }: {
   shelfError: string | null;
 }) {
   return creating || (!shelfError && books.length === 0);
+}
+
+export function shouldDisableSidebar({ streaming, structureMutating }: {
+  streaming: boolean;
+  structureMutating: boolean;
+}) {
+  return streaming || structureMutating;
 }
 
 export async function runShelfMutation({
@@ -139,10 +147,12 @@ export default function App() {
   const [planOpen, setPlanOpen] = useState(false);
   const [planText, setPlanText] = useState('');
   const [planAdopting, setPlanAdopting] = useState(false);
+  const [structureMutating, setStructureMutating] = useState(false);
   const abortRef = useRef<null | (() => void)>(null);
   const streamingRef = useRef(false);
   const streamingTokenRef = useRef(0);
   const planAdoptingRef = useRef(false);
+  const structureMutatingRef = useRef(false);
 
   // 拉取书架列表
   const loadShelf = async () => loadShelfBooks(
@@ -190,6 +200,10 @@ export default function App() {
       start(token);
     },
   });
+  const setStructureMutationRunning = (running: boolean) => {
+    structureMutatingRef.current = running;
+    setStructureMutating(running);
+  };
   // 返回书架前先停掉任意进行中的流，避免离开后仍有 SSE 回调改状态
   const goShelf = async () => { if (streamingRef.current) stopGen(); setCreating(false); setView('shelf'); await loadShelf(); };
 
@@ -351,17 +365,30 @@ export default function App() {
       <TopBar title={tree.book.title} streaming={streaming} statusText={statusText}
         onOpenSettings={() => setShowSettings(true)} onHome={goShelf} />
       <div className="body">
-        <Sidebar tree={tree} selection={selection} disabled={streaming}
+        <Sidebar tree={tree} selection={selection}
+          disabled={shouldDisableSidebar({ streaming, structureMutating })}
           onSelect={setSelection}
           onAddSection={async () => {
-            try { await api.addSection(bookId); await reload(bookId); }
-            catch (e) { toast.error('新建部失败：' + messageOf(e)); }
+            await runExclusiveAction({
+              isRunning: () => structureMutatingRef.current,
+              setRunning: setStructureMutationRunning,
+              task: async () => {
+                try { await api.addSection(bookId); await reload(bookId); }
+                catch (e) { toast.error('新建部失败：' + messageOf(e)); }
+              },
+            });
           }}
           onAddChapter={async (sid) => {
-            try {
-              const c = await api.addChapter(bookId, sid);
-              await reload(bookId, { kind: 'chapter', sectionId: sid, chapterId: c.id });
-            } catch (e) { toast.error('新建章失败：' + messageOf(e)); }
+            await runExclusiveAction({
+              isRunning: () => structureMutatingRef.current,
+              setRunning: setStructureMutationRunning,
+              task: async () => {
+                try {
+                  const c = await api.addChapter(bookId, sid);
+                  await reload(bookId, { kind: 'chapter', sectionId: sid, chapterId: c.id });
+                } catch (e) { toast.error('新建章失败：' + messageOf(e)); }
+              },
+            });
           }}
           onPlanSections={runSections} />
         <div className="content">
