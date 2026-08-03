@@ -234,21 +234,24 @@ export async function addChapter(bookId, sectionId, { title } = {}) {
   const safeBookId = safeId(bookId);
   const safeSectionId = safeId(sectionId);
   return withStoreLock(`book:${safeBookId}:section:${safeSectionId}:chapters`, async () => {
-    const section = await readSection(safeBookId, safeSectionId);
-    const index = section.chapters.length + 1;
-    const id = `chapter-${pad2(index)}`;
-    const cleanTitle = typeof title === 'string' ? title.trim() : '';
-    const chapter = {
-      id, index,
-      title: cleanTitle,
-      titleSource: cleanTitle ? 'manual' : 'default',
-      body: emptyVersioned(), content: '',
-      characters: [], summary: '', progress: '', status: 'done',
-    };
-    await atomicWriteJson(join(bookDir(safeBookId), safeSectionId, `${id}.json`), chapter);
-    section.chapters.push(id);
-    await writeSection(safeBookId, safeSectionId, section);
-    return chapter;
+    return withStoreLock(sectionFileLockKey(safeBookId, safeSectionId), async () => {
+      const section = await readSection(safeBookId, safeSectionId);
+      const index = section.chapters.length + 1;
+      const id = `chapter-${pad2(index)}`;
+      const cleanTitle = typeof title === 'string' ? title.trim() : '';
+      const chapter = {
+        id, index,
+        title: cleanTitle,
+        titleSource: cleanTitle ? 'manual' : 'default',
+        body: emptyVersioned(), content: '',
+        characters: [], summary: '', progress: '', status: 'done',
+      };
+      await atomicWriteJson(join(bookDir(safeBookId), safeSectionId, `${id}.json`), chapter);
+      section.chapters.push(id);
+      await atomicWriteJson(join(bookDir(safeBookId), safeSectionId, 'section.json'), section);
+      await touchBook(safeBookId);
+      return chapter;
+    });
   });
 }
 export async function readChapter(bookId, sectionId, chapterId) {
@@ -269,8 +272,18 @@ export async function writeChapter(bookId, sectionId, chapterId, obj) {
       await touchBookUnlocked(safeBookId);
     }));
 }
-export async function deleteChapterFile(bookId, sectionId, chapterId) {
-  await rm(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), { force: true });
+export async function deleteChapter(bookId, sectionId, chapterId) {
+  const safeBookId = safeId(bookId);
+  const safeSectionId = safeId(sectionId);
+  const safeChapterId = safeId(chapterId);
+  return withStoreLock(sectionFileLockKey(safeBookId, safeSectionId), async () => {
+    await rm(join(bookDir(safeBookId), safeSectionId, `${safeChapterId}.json`), { force: true });
+    const section = await readSection(safeBookId, safeSectionId);
+    section.chapters = (section.chapters || []).filter((cid) => cid !== safeChapterId);
+    await atomicWriteJson(join(bookDir(safeBookId), safeSectionId, 'section.json'), section);
+    await touchBook(safeBookId);
+    return section;
+  });
 }
 
 // ——— history 回退栈（限深 20）———

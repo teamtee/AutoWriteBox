@@ -115,6 +115,20 @@ test('removeChapterReference 只删除目标章节引用', async () => {
   assert.deepEqual(back.chapters, [c2.id]);
 });
 
+test('deleteChapter 与 addChapter 并发时不留下悬空章节引用', async () => {
+  const s = await store.addSection(bookId, { title: '起源' });
+  const doomed = await store.addChapter(bookId, s.id, { title: '失败空章' });
+
+  const [, added] = await Promise.all([
+    store.deleteChapter(bookId, s.id, doomed.id),
+    store.addChapter(bookId, s.id, { title: '新章' }),
+  ]);
+
+  const back = await store.readSection(bookId, s.id);
+  assert.deepEqual(back.chapters, [added.id]);
+  await assert.doesNotReject(() => store.readChapter(bookId, s.id, added.id));
+});
+
 test('pushHistory（覆盖前存档）与 rollback 还原正文', () => {
   const ch = { content: '第一版', history: [] };
   // 约定：先存档当前值，再改写
