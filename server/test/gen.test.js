@@ -145,6 +145,46 @@ test('gen/chapter 在 digest 返回前已落盘正文', async () => {
   }, hangingDigestDeps);
 });
 
+test('gen/chapter digest 迟到不覆盖期间保存的章节新版', async () => {
+  let releaseDigest;
+  let digestStartedResolve;
+  const digestStarted = new Promise((resolve) => { digestStartedResolve = resolve; });
+  const digestResult = new Promise((resolve) => { releaseDigest = resolve; });
+  const hangingDigestDeps = {
+    async *streamChat() { yield '这是'; yield '正文'; },
+    async nonStreamChat() {
+      digestStartedResolve();
+      return digestResult;
+    },
+  };
+
+  await withServer(async () => {
+    const book = await store.createBook({ premise: 'p' });
+    const s = await store.addSection(book.id, {});
+    const res = await post('/api/gen/chapter', { bookId: book.id, sectionId: s.id, mode: 'next' });
+    const { reader } = await readUntilText(res, '正文');
+    await digestStarted;
+
+    const sec = await store.readSection(book.id, s.id);
+    const chapterId = sec.chapters[0];
+    await store.versionSet(book.id, `section:${s.id}:chapter:${chapterId}`, '用户手动修订正文');
+
+    releaseDigest(JSON.stringify({
+      chapterTitle: '夜雨来客',
+      sectionTitle: '暗潮初现',
+      summary: '小结A',
+      progress: '下一步B',
+      newCharacters: [],
+    }));
+    await readRest(reader);
+
+    const ch = await store.readChapter(book.id, s.id, chapterId);
+    assert.deepEqual(ch.body.versions, ['', '这是正文', '用户手动修订正文']);
+    assert.equal(store.currentText(ch.body), '用户手动修订正文');
+    assert.equal(ch.summary, '小结A');
+  }, hangingDigestDeps);
+});
+
 test('非首个完成章节不改部名，manual 标题不被覆盖', async () => {
   await withServer(async () => {
     const book = await store.createBook({ premise: 'p' });

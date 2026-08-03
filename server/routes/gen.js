@@ -132,13 +132,14 @@ export function mountGenRoutes(app, deps = {}) {
         });
         const d = extractDigest(digestText);
         // 仅当 digest 解析出有效值时才更新，避免空值覆盖已有 summary/progress（断片保护）
-        if (d.chapterTitle && chapter.titleSource === 'default') {
-          chapter.title = d.chapterTitle;
-          chapter.titleSource = 'ai';
+        const latestChapter = await store.readChapter(bookId, sectionId, chapterId);
+        if (d.chapterTitle && latestChapter.titleSource === 'default') {
+          latestChapter.title = d.chapterTitle;
+          latestChapter.titleSource = 'ai';
         }
-        if (d.summary) chapter.summary = d.summary;
-        if (d.progress) chapter.progress = d.progress;
-        if (d.newCharacters.length) chapter.characters.push(...d.newCharacters);
+        if (d.summary) latestChapter.summary = d.summary;
+        if (d.progress) latestChapter.progress = d.progress;
+        if (d.newCharacters.length) latestChapter.characters.push(...d.newCharacters);
         // 冒泡
         const sec = await store.readSection(bookId, sectionId);
         if (d.sectionTitle && sec.titleSource === 'default') {
@@ -156,14 +157,14 @@ export function mountGenRoutes(app, deps = {}) {
             sec.titleSource = 'ai';
           }
         }
-        if (d.summary) sec.summary = (sec.summary ? sec.summary + '\n' : '') + `第${chapter.index}章：${d.summary}`;
+        if (d.summary) sec.summary = (sec.summary ? sec.summary + '\n' : '') + `第${latestChapter.index}章：${d.summary}`;
         if (d.progress) sec.progress = d.progress;
         await store.writeSection(bookId, sectionId, sec);
         const bk = await store.readBook(bookId);
         if (d.progress) bk.progress = d.progress;
         await store.writeBook(bookId, bk);
+        await store.writeChapter(bookId, sectionId, chapterId, latestChapter);
       } catch { /* digest 失败不影响正文保存 */ }
-      await store.writeChapter(bookId, sectionId, chapterId, chapter);
 
       send(res, { done: true, chapterId });
     } catch (e) {
