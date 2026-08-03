@@ -69,6 +69,7 @@ export function streamGen(
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = '';
+      let terminal = false;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -76,10 +77,11 @@ export function streamGen(
         buf = rest;
         for (const e of events) {
           if (e.delta) cb.onDelta?.(e.delta);
-          if (e.error) cb.onError?.(e.error);
-          if (e.done) cb.onDone?.(e);
+          if (e.error) { terminal = true; cb.onError?.(e.error); }
+          if (e.done) { terminal = true; cb.onDone?.(e); }
         }
       }
+      if (!terminal && !ctrl.signal.aborted) cb.onError?.('生成中断：响应未完成');
     } catch (err) {
       if ((err as Error).name !== 'AbortError') cb.onError?.(String((err as Error).message || err));
     }

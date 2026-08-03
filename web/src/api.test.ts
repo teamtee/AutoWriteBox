@@ -32,4 +32,21 @@ describe('parseSSELines', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(errors).toEqual(['BAD_PATH']);
   });
+  it('streamGen 在 SSE 正常断开但缺少终止事件时触发 onError', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(
+      'data: {"delta":"半截"}\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    )) as unknown as typeof fetch;
+
+    const deltas: string[] = [];
+    const errors: string[] = [];
+    streamGen('/api/gen/chapter', {}, {
+      onDelta: (d) => deltas.push(d),
+      onError: (m) => errors.push(m),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(deltas).toEqual(['半截']);
+    expect(errors).toEqual(['生成中断：响应未完成']);
+  });
 });
