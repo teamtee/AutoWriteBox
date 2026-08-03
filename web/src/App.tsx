@@ -12,9 +12,11 @@ import { SettingsPage } from './components/SettingsPage';
 import { FirstRun } from './components/FirstRun';
 import { SectionPlanPanel } from './components/SectionPlanPanel';
 import { Bookshelf } from './components/Bookshelf';
+import { runExclusiveAction } from './asyncAction';
 
 // 顶层视图：书架 / 单本书
 type View = 'shelf' | 'book';
+export { runExclusiveAction as runExclusiveSectionAdoption } from './asyncAction';
 
 const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e);
 
@@ -117,24 +119,6 @@ export async function adoptSectionTitles({
   onSuccess(created);
   onFinish();
   return { created, total: titles.length, ok: true };
-}
-
-export async function runExclusiveSectionAdoption<T>({
-  isRunning,
-  setRunning,
-  task,
-}: {
-  isRunning: () => boolean;
-  setRunning: (running: boolean) => void;
-  task: () => Promise<T>;
-}) {
-  if (isRunning()) return null;
-  setRunning(true);
-  try {
-    return await task();
-  } finally {
-    setRunning(false);
-  }
 }
 
 export default function App() {
@@ -285,7 +269,7 @@ export default function App() {
     });
   };
   const adoptSections = async (titles: string[]) => {
-    await runExclusiveSectionAdoption({
+    await runExclusiveAction({
       isRunning: () => planAdoptingRef.current,
       setRunning: (running) => { planAdoptingRef.current = running; setPlanAdopting(running); },
       task: () => adoptSectionTitles({

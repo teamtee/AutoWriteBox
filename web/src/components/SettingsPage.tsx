@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Config } from '../types';
 import { getConfig, saveConfig } from '../api';
+import { runExclusiveAction } from '../asyncAction';
 import { useToast } from './Toast';
 
 const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e);
@@ -8,6 +9,7 @@ const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e);
 export function SettingsPage({ onClose }: { onClose: () => void }) {
   const [cfg, setCfg] = useState<Config>({ baseUrl: '', model: '', apiKey: '', chapterWordTarget: 2000 });
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const toast = useToast();
   useEffect(() => {
     let alive = true;
@@ -19,16 +21,22 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
   const set = (k: keyof Config) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setCfg({ ...cfg, [k]: k === 'chapterWordTarget' ? Number(e.target.value) : e.target.value });
   const save = async () => {
-    setSaving(true);
-    try {
-      const s = await saveConfig(cfg);
-      setCfg(s);
-      toast.success('✓ 设置已保存');
-      onClose();
-    } catch (e) {
-      toast.error('保存设置失败：' + messageOf(e));
-      setSaving(false);
-    }
+    const saved = await runExclusiveAction({
+      isRunning: () => savingRef.current,
+      setRunning: (running) => { savingRef.current = running; setSaving(running); },
+      task: async () => {
+        try {
+          const s = await saveConfig(cfg);
+          setCfg(s);
+          toast.success('✓ 设置已保存');
+          return true;
+        } catch (e) {
+          toast.error('保存设置失败：' + messageOf(e));
+          return false;
+        }
+      },
+    });
+    if (saved) onClose();
   };
   return (
     <div className="settings-page">
@@ -41,7 +49,7 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
           <label>每章目标字数<input type="number" value={cfg.chapterWordTarget} onChange={set('chapterWordTarget')} /></label>
           <div className="btn-row">
             <button className="hbtn accent-2" disabled={saving} onClick={save}>{saving ? '保存中…' : '保存'}</button>
-            <button className="hbtn" onClick={onClose}>返回</button>
+            <button className="hbtn" disabled={saving} onClick={onClose}>返回</button>
           </div>
         </div>
       </article>

@@ -1,22 +1,27 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { createBook } from '../api';
+import { runExclusiveAction } from '../asyncAction';
 import type { Book } from '../types';
 import { useToast } from './Toast';
 
 export function FirstRun({ onCreated }: { onCreated: (book: Book) => void | Promise<void> }) {
   const [premise, setPremise] = useState('');
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const toast = useToast();
   const submit = async () => {
-    setBusy(true);
-    try {
-      const book = await createBook(premise);
-      await onCreated(book);
-    } catch (e) {
-      toast.error('创建失败：' + (e as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    await runExclusiveAction({
+      isRunning: () => busyRef.current,
+      setRunning: (running) => { busyRef.current = running; setBusy(running); },
+      task: async () => {
+        try {
+          const book = await createBook(premise);
+          await onCreated(book);
+        } catch (e) {
+          toast.error('创建失败：' + (e as Error).message);
+        }
+      },
+    });
   };
   return (
     <div className="first-run">
