@@ -6,29 +6,52 @@ import {
 } from '../prompts.js';
 import { extractDigest as defaultExtract, sanitizeGeneratedTitle } from '../llm.js';
 
-function sseInit(res) {
+function sseInit(req, res) {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  const abortController = new AbortController();
+  res.locals.abortSignal = abortController.signal;
+  res.locals.clientGone = false;
+  const markClientGone = () => {
+    res.locals.clientGone = true;
+    abortController.abort();
+  };
+  req.on('aborted', markClientGone);
+  res.on('close', () => {
+    if (!res.writableEnded) markClientGone();
+  });
 }
-const send = (res, obj) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+const isClientGone = (req, res) => req.aborted || res.locals.clientGone || res.locals.abortSignal?.aborted || res.destroyed || res.writableEnded;
+function assertClientAlive(req, res) {
+  if (isClientGone(req, res)) throw new Error('CLIENT_ABORTED');
+}
+const send = (res, obj) => {
+  if (res.destroyed || res.writableEnded) return;
+  res.write(`data: ${JSON.stringify(obj)}\n\n`);
+};
+const end = (res) => {
+  if (!res.destroyed && !res.writableEnded) res.end();
+};
 
 export function mountGenRoutes(app, deps = {}) {
   const streamChat = deps.streamChat;         // 由 index.js 注入真实实现
   const nonStreamChat = deps.nonStreamChat;
   const extractDigest = deps.extractDigest || defaultExtract;
 
-  async function streamInto(res, { config, system, instruction }) {
+  async function streamInto(req, res, { config, system, instruction }) {
     let full = '';
-    for await (const delta of streamChat({ config, system, messages: [{ role: 'user', content: instruction }] })) {
+    for await (const delta of streamChat({ config, system, messages: [{ role: 'user', content: instruction }], signal: res.locals.abortSignal })) {
+      assertClientAlive(req, res);
       full += delta;
       send(res, { delta });
     }
+    assertClientAlive(req, res);
     return full;
   }
 
   app.post('/api/books/:id/version/rewrite', async (req, res) => {
-    sseInit(res);
+    sseInit(req, res);
     try {
       const { path } = req.body || {};
       const p = store.parseVersionPath(path);       // 非法 path 抛 BAD_PATH
@@ -39,7 +62,7 @@ export function mountGenRoutes(app, deps = {}) {
       const instruction = p.type === 'outline'
         ? buildOutlineInstruction(book.premise)
         : buildCoreFieldInstruction(p.field, book);
-      const full = await streamInto(res, { config, system, instruction });
+      const full = await streamInto(req, res, { config, system, instruction });
       const vf = await store.versionSet(req.params.id, path, full);
       if (p.type === 'outline') {
         try {
@@ -48,6 +71,7 @@ export function mountGenRoutes(app, deps = {}) {
             const rawTitle = await nonStreamChat({
               config,
               system,
+              signal: res.locals.abortSignal,
               messages: [{
                 role: 'user',
                 content: buildBookTitleInstruction(freshBook.premise, full),
@@ -67,28 +91,28 @@ export function mountGenRoutes(app, deps = {}) {
       }
       send(res, { done: true, versions: vf.versions, cursor: vf.cursor });
     } catch (e) { send(res, { error: String(e.message || e) }); }
-    res.end();
+    end(res);
   });
 
   // 让 LLM 规划分部结构，SSE 流式返回文本；不自动建部，由用户参考后手动新建
   app.post('/api/gen/sections', async (req, res) => {
-    sseInit(res);
+    sseInit(req, res);
     try {
       const config = await store.readConfig();
       const book = await store.readBook(req.body.bookId);
       const system = buildSystemPrompt(book.settings.core);
-      const full = await streamInto(res, {
+      const full = await streamInto(req, res, {
         config, system,
         // outline 迁移后是 {versions,cursor}，需通过 currentText 读当前版本；直接 .content 会得到 undefined
         instruction: buildSectionsInstruction(store.currentText(book.outline)),
       });
       send(res, { done: true, sections: full });
     } catch (e) { send(res, { error: String(e.message || e) }); }
-    res.end();
+    end(res);
   });
 
   app.post('/api/gen/chapter', async (req, res) => {
-    sseInit(res);
+    sseInit(req, res);
     const { bookId, sectionId, mode, whip } = req.body;
     let createdChapterId = null;  // mode==='next' 时新建的空章，失败要回滚
     let full = '';
@@ -120,7 +144,7 @@ export function mountGenRoutes(app, deps = {}) {
       const instruction = context + '\n\n' +
         buildChapterInstruction({ chapterIndex: chapter.index, wordTarget: config.chapterWordTarget, mode, whip, currentContent });
 
-      full = await streamInto(res, { config, system, instruction });
+      full = await streamInto(req, res, { config, system, instruction });
       store.commitVersion(chapter.body, full);      // 写入新版；writeChapter 会同步派生 content
       await store.writeChapter(bookId, sectionId, chapterId, chapter);
 
@@ -128,6 +152,7 @@ export function mountGenRoutes(app, deps = {}) {
       try {
         const digestText = await nonStreamChat({
           config, system,
+          signal: res.locals.abortSignal,
           messages: [{ role: 'user', content: `以下是正文：\n${full}\n\n${DIGEST_INSTRUCTION}` }],
         });
         const d = extractDigest(digestText);
@@ -179,6 +204,6 @@ export function mountGenRoutes(app, deps = {}) {
       }
       send(res, { error: String(e.message || e) });
     }
-    res.end();
+    end(res);
   });
 }

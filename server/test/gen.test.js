@@ -185,6 +185,90 @@ test('gen/chapter digest 迟到不覆盖期间保存的章节新版', async () =
   }, hangingDigestDeps);
 });
 
+test('gen/chapter next 客户端停止后不继续落盘新章', async () => {
+  let releaseStream;
+  let streamSettledResolve;
+  const allowStreamToContinue = new Promise((resolve) => { releaseStream = resolve; });
+  const streamSettled = new Promise((resolve) => { streamSettledResolve = resolve; });
+  const slowDeps = {
+    async *streamChat() {
+      try {
+        yield '开头';
+        await allowStreamToContinue;
+        yield '后续';
+      } finally {
+        streamSettledResolve();
+      }
+    },
+    async nonStreamChat() {
+      return JSON.stringify({ summary: '小结A', progress: '下一步B', newCharacters: [] });
+    },
+  };
+
+  await withServer(async () => {
+    const book = await j(await post('/api/books', { premise: 'p' }));
+    const s = await j(await post(`/api/books/${book.id}/sections`, {}));
+    const ctrl = new AbortController();
+    const res = await fetch(base + '/api/gen/chapter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookId: book.id, sectionId: s.id, mode: 'next' }),
+      signal: ctrl.signal,
+    });
+    const { out } = await readUntilText(res, '开头');
+    assert.match(out, /开头/);
+
+    ctrl.abort();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    releaseStream();
+    await streamSettled;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const sec = await store.readSection(book.id, s.id);
+    assert.equal(sec.chapters.length, 0);
+    assert.equal(existsSync(join(root, 'books', book.id, s.id, 'chapter-01.json')), false);
+  }, slowDeps);
+});
+
+test('gen/chapter next 客户端停止会中止上游 streamChat', async () => {
+  let finishStream;
+  let upstreamAbortResolve;
+  const streamCanFinish = new Promise((resolve) => { finishStream = resolve; });
+  const upstreamAborted = new Promise((resolve) => { upstreamAbortResolve = resolve; });
+  const abortableDeps = {
+    async *streamChat({ signal }) {
+      yield '开头';
+      signal?.addEventListener('abort', () => upstreamAbortResolve('aborted'), { once: true });
+      await streamCanFinish;
+    },
+    async nonStreamChat() {
+      return JSON.stringify({ summary: '小结A', progress: '下一步B', newCharacters: [] });
+    },
+  };
+
+  await withServer(async () => {
+    const book = await j(await post('/api/books', { premise: 'p' }));
+    const s = await j(await post(`/api/books/${book.id}/sections`, {}));
+    const ctrl = new AbortController();
+    const res = await fetch(base + '/api/gen/chapter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ bookId: book.id, sectionId: s.id, mode: 'next' }),
+      signal: ctrl.signal,
+    });
+    const { out } = await readUntilText(res, '开头');
+    assert.match(out, /开头/);
+
+    ctrl.abort();
+    const abortResult = await Promise.race([
+      upstreamAborted,
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 50)),
+    ]);
+    finishStream();
+    assert.equal(abortResult, 'aborted');
+  }, abortableDeps);
+});
+
 test('非首个完成章节不改部名，manual 标题不被覆盖', async () => {
   await withServer(async () => {
     const book = await store.createBook({ premise: 'p' });

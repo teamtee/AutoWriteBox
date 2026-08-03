@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSSEChunk, extractDigest, sanitizeGeneratedTitle } from '../llm.js';
+import { parseSSEChunk, extractDigest, sanitizeGeneratedTitle, streamChat } from '../llm.js';
 
 test('parseSSEChunk 抽取 delta 并保留残尾', () => {
   const buf =
@@ -15,6 +15,29 @@ test('parseSSEChunk 抽取 delta 并保留残尾', () => {
 test('parseSSEChunk 忽略 [DONE]', () => {
   const { deltas } = parseSSEChunk('data: [DONE]\n\n');
   assert.deepEqual(deltas, []);
+});
+
+test('streamChat 将 abort signal 传给 fetch', async () => {
+  const realFetch = globalThis.fetch;
+  const ctrl = new AbortController();
+  let capturedSignal;
+  try {
+    globalThis.fetch = async (url, init) => {
+      capturedSignal = init.signal;
+      return new Response('data: [DONE]\n\n', { status: 200 });
+    };
+    for await (const _ of streamChat({
+      config: { baseUrl: 'https://example.test', model: 'm', apiKey: 'k' },
+      system: 's',
+      messages: [],
+      signal: ctrl.signal,
+    })) {
+      // no deltas
+    }
+    assert.equal(capturedSignal, ctrl.signal);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 test('extractDigest 直接解析合法 JSON', () => {

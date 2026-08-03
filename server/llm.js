@@ -16,7 +16,7 @@ export function parseSSEChunk(buffer) {
   return { deltas, rest };
 }
 
-export async function* streamChat({ config, system, messages }) {
+export async function* streamChat({ config, system, messages, signal }) {
   const body = {
     model: config.model,
     stream: true,
@@ -26,6 +26,7 @@ export async function* streamChat({ config, system, messages }) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.apiKey}` },
     body: JSON.stringify(body),
+    signal,
   });
   if (!res.ok) throw new Error(`LLM_HTTP_${res.status}`);
   const reader = res.body.getReader();
@@ -41,9 +42,9 @@ export async function* streamChat({ config, system, messages }) {
   }
 }
 
-export async function nonStreamChat({ config, system, messages }) {
+export async function nonStreamChat({ config, system, messages, signal }) {
   let out = '';
-  for await (const d of streamChat({ config, system, messages })) out += d;
+  for await (const d of streamChat({ config, system, messages, signal })) out += d;
   return out;
 }
 
