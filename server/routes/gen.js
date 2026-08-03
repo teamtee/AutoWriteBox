@@ -172,6 +172,7 @@ export function mountGenRoutes(app, deps = {}) {
           const sec = await store.readSection(bookId, sectionId);
           sec.chapters = sec.chapters.filter((cid) => cid !== createdChapterId);
           await store.writeSection(bookId, sectionId, sec);
+          await store.deleteChapterFile(bookId, sectionId, createdChapterId);
         } catch { /* 回滚失败不再二次抛错 */ }
       }
       send(res, { error: String(e.message || e) });

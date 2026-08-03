@@ -187,6 +187,9 @@ export async function writeChapter(bookId, sectionId, chapterId, obj) {
   await atomicWriteJson(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), obj);
   await touchBook(bookId);
 }
+export async function deleteChapterFile(bookId, sectionId, chapterId) {
+  await rm(join(bookDir(bookId), safeId(sectionId), `${safeId(chapterId)}.json`), { force: true });
+}
 
 // ——— history 回退栈（限深 20）———
 const HISTORY_MAX = 20;

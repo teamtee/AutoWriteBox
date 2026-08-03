@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import express from 'express';
@@ -25,7 +25,8 @@ const fakeDeps = {
 };
 
 let base;
-beforeEach(() => { store.setDataRoot(mkdtempSync(join(tmpdir(), 'novelbox-'))); });
+let root;
+beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'novelbox-')); store.setDataRoot(root); });
 function appWithGen(deps = fakeDeps) {
   const app = express();
   app.use(express.json());
@@ -322,5 +323,6 @@ test('gen/chapter next 中途抛错时回滚空章，不残留', async () => {
     assert.match(sse, /"error"/);
     const sec = await store.readSection(book.id, s.id);
     assert.equal(sec.chapters.length, 0);  // 已回滚，不残留
+    assert.equal(existsSync(join(root, 'books', book.id, s.id, 'chapter-01.json')), false);
   }, failDeps);
 });
