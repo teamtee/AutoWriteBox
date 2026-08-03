@@ -266,8 +266,10 @@ export default function App() {
       isRunning: () => versionMutatingRef.current,
       setRunning: setVersionMutationRunning,
       task: async () => {
-        try { await api.versionMove(bookId, path, delta); await reload(bookId); }
-        catch (e) { toast.error('切换版本失败：' + messageOf(e)); }
+        try { await api.versionMove(bookId, path, delta); }
+        catch (e) { toast.error('切换版本失败：' + messageOf(e)); return; }
+        try { await reload(bookId); }
+        catch { toast.error('刷新数据失败'); }
       },
     });
   };
@@ -276,8 +278,11 @@ export default function App() {
       isRunning: () => versionMutatingRef.current,
       setRunning: setVersionMutationRunning,
       task: async () => {
-        try { await api.versionClear(bookId, path); await reload(bookId); toast.info('已清空（可用「上一个」找回）'); }
-        catch (e) { toast.error('清空失败：' + messageOf(e)); }
+        try { await api.versionClear(bookId, path); }
+        catch (e) { toast.error('清空失败：' + messageOf(e)); return; }
+        try { await reload(bookId); }
+        catch { toast.error('刷新数据失败'); }
+        toast.info('已清空（可用「上一个」找回）');
       },
     });
   };
@@ -286,8 +291,11 @@ export default function App() {
       isRunning: () => versionMutatingRef.current,
       setRunning: setVersionMutationRunning,
       task: async () => {
-        try { await api.versionSave(bookId, path, text); await reload(bookId); toast.success('✓ 已保存'); }
-        catch (e) { toast.error('保存失败：' + messageOf(e)); }
+        try { await api.versionSave(bookId, path, text); }
+        catch (e) { toast.error('保存失败：' + messageOf(e)); return; }
+        try { await reload(bookId); }
+        catch { toast.error('刷新数据失败'); }
+        toast.success('✓ 已保存');
       },
     });
   };
