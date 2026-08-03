@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as store from '../store.js';
@@ -28,6 +29,15 @@ test('writeBook 更新 updatedAt', async () => {
   await store.writeBook(book.id, book);
   const back = await store.readBook(book.id);
   assert.equal(back.title, '改名');
+});
+
+test('atomicWriteJson 并发写同一路径不因临时文件撞名失败', async () => {
+  const path = join(root, 'atomic.json');
+  await Promise.all(Array.from({ length: 50 }, (_, i) =>
+    store.atomicWriteJson(path, { i })));
+
+  const back = JSON.parse(await readFile(path, 'utf8'));
+  assert.equal(typeof back.i, 'number');
 });
 
 test('listBooks 返回摘要', async () => {

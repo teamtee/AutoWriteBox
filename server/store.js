@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile, rename, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 let DATA_ROOT = join(process.cwd(), 'data');
 const storeLocks = new Map();
@@ -34,9 +35,14 @@ async function withStoreLock(key, fn) {
 }
 
 export async function atomicWriteJson(absPath, obj) {
-  const tmp = absPath + '.tmp';
-  await writeFile(tmp, JSON.stringify(obj, null, 2), 'utf8');
-  await rename(tmp, absPath);
+  const tmp = `${absPath}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmp, JSON.stringify(obj, null, 2), 'utf8');
+    await rename(tmp, absPath);
+  } catch (err) {
+    await rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
 }
 
 function emptyOutline() { return emptyVersioned(); }
