@@ -109,3 +109,19 @@ test('extractDigest 解析并清洗章名部名', () => {
   assert.equal(d.chapterTitle, '夜雨来客');
   assert.equal(d.sectionTitle, '暗潮初现');
 });
+
+test('extractDigest 丢弃类型非法的摘要进度和人物条目', () => {
+  const d = extractDigest(JSON.stringify({
+    summary: { bad: 'object' },
+    progress: ['bad'],
+    newCharacters: [
+      'bad',
+      { name: '张三', role: 1, desc: 'x' },
+      { name: '李四', role: '新角色', desc: 'y' },
+    ],
+  }));
+
+  assert.equal(d.summary, '');
+  assert.equal(d.progress, '');
+  assert.deepEqual(d.newCharacters, [{ name: '李四', role: '新角色', desc: 'y' }]);
+});

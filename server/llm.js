@@ -73,6 +73,16 @@ export function extractDigest(text) {
     summary: '', progress: '', newCharacters: [],
   };
   const tryParse = (s) => { try { return JSON.parse(s); } catch { return null; } };
+  const cleanText = (value) => (typeof value === 'string' ? value : '');
+  const cleanCharacters = (value) => {
+    if (!Array.isArray(value)) return [];
+    return value.filter((item) =>
+      item &&
+      typeof item.name === 'string' &&
+      typeof item.role === 'string' &&
+      typeof item.desc === 'string')
+      .map(({ name, role, desc }) => ({ name, role, desc }));
+  };
   let obj = tryParse(text.trim());
   if (!obj) {
     const m = text.match(/\{[\s\S]*\}/);
@@ -82,8 +92,8 @@ export function extractDigest(text) {
   return {
     chapterTitle: sanitizeGeneratedTitle(obj.chapterTitle, '章'),
     sectionTitle: sanitizeGeneratedTitle(obj.sectionTitle, '部'),
-    summary: obj.summary || '',
-    progress: obj.progress || '',
-    newCharacters: Array.isArray(obj.newCharacters) ? obj.newCharacters : [],
+    summary: cleanText(obj.summary),
+    progress: cleanText(obj.progress),
+    newCharacters: cleanCharacters(obj.newCharacters),
   };
 }
