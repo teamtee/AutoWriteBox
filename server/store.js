@@ -16,6 +16,8 @@ export function safeId(id) {
 }
 const bookDir = (id) => join(booksDir(), safeId(id));
 const bookJsonLockKey = (bookId) => `book:${safeId(bookId)}:book-json`;
+const sectionFileLockKey = (bookId, sectionId) =>
+  `book:${safeId(bookId)}:section:${safeId(sectionId)}:section-file`;
 const chapterFileLockKey = (bookId, sectionId, chapterId) =>
   `book:${safeId(bookId)}:section:${safeId(sectionId)}:chapter:${safeId(chapterId)}:file`;
 
@@ -198,9 +200,21 @@ export async function readSection(bookId, sectionId) {
     join(bookDir(bookId), safeId(sectionId), 'section.json'), 'utf8'));
   return normalizeEntityTitle(section, '部');
 }
-export async function writeSection(bookId, sectionId, obj) {
-  await atomicWriteJson(join(bookDir(bookId), safeId(sectionId), 'section.json'), obj);
-  await touchBook(bookId);
+export async function writeSection(bookId, sectionId, obj, { preserveExistingChapters = true } = {}) {
+  const safeBookId = safeId(bookId);
+  const safeSectionId = safeId(sectionId);
+  return withStoreLock(sectionFileLockKey(safeBookId, safeSectionId), async () => {
+    if (preserveExistingChapters) {
+      try {
+        const current = await readSection(safeBookId, safeSectionId);
+        obj.chapters = Array.from(new Set([...(current.chapters || []), ...(obj.chapters || [])]));
+      } catch (err) {
+        if (err.code !== 'ENOENT') throw err;
+      }
+    }
+    await atomicWriteJson(join(bookDir(safeBookId), safeSectionId, 'section.json'), obj);
+    await touchBook(safeBookId);
+  });
 }
 
 // ——— chapter ———

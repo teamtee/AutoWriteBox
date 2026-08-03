@@ -91,6 +91,19 @@ test('并发 addChapter 仍生成连续且不重复的章 id', async () => {
   ]);
 });
 
+test('旧 section 快照写回摘要时不覆盖期间新增的章节列表', async () => {
+  const s = await store.addSection(bookId, { title: '起源' });
+  const stale = await store.readSection(bookId, s.id);
+  const c = await store.addChapter(bookId, s.id, { title: '新章' });
+
+  stale.summary = 'digest 小结';
+  await store.writeSection(bookId, s.id, stale);
+
+  const back = await store.readSection(bookId, s.id);
+  assert.equal(back.summary, 'digest 小结');
+  assert.deepEqual(back.chapters, [c.id]);
+});
+
 test('pushHistory（覆盖前存档）与 rollback 还原正文', () => {
   const ch = { content: '第一版', history: [] };
   // 约定：先存档当前值，再改写

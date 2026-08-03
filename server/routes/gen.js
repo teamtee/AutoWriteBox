@@ -198,7 +198,7 @@ export function mountGenRoutes(app, deps = {}) {
         try {
           const sec = await store.readSection(bookId, sectionId);
           sec.chapters = sec.chapters.filter((cid) => cid !== createdChapterId);
-          await store.writeSection(bookId, sectionId, sec);
+          await store.writeSection(bookId, sectionId, sec, { preserveExistingChapters: false });
           await store.deleteChapterFile(bookId, sectionId, createdChapterId);
         } catch { /* 回滚失败不再二次抛错 */ }
       }
