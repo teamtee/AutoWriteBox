@@ -106,6 +106,20 @@ test('旧 section 快照写回摘要时不覆盖期间新增的章节列表', as
   assert.deepEqual(back.chapters, [c.id]);
 });
 
+test('旧 section 快照写回摘要时不复活期间已删除的章节引用', async () => {
+  const s = await store.addSection(bookId, { title: '起源' });
+  const doomed = await store.addChapter(bookId, s.id, { title: '待删章' });
+  const stale = await store.readSection(bookId, s.id);
+
+  await store.deleteChapter(bookId, s.id, doomed.id);
+  stale.summary = '迟到 digest 小结';
+  await store.writeSection(bookId, s.id, stale);
+
+  const back = await store.readSection(bookId, s.id);
+  assert.deepEqual(back.chapters, []);
+  assert.equal(existsSync(join(root, 'books', bookId, s.id, `${doomed.id}.json`)), false);
+});
+
 test('store 不暴露只删除引用的章节删除入口', () => {
   assert.equal(store.removeChapterReference, undefined);
 });

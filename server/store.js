@@ -207,7 +207,7 @@ export async function writeSection(bookId, sectionId, obj, { preserveExistingCha
     if (preserveExistingChapters) {
       try {
         const current = await readSection(safeBookId, safeSectionId);
-        obj.chapters = Array.from(new Set([...(current.chapters || []), ...(obj.chapters || [])]));
+        obj.chapters = current.chapters || [];
       } catch (err) {
         if (err.code !== 'ENOENT') throw err;
       }
