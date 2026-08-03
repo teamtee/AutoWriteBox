@@ -3,11 +3,15 @@ import type { Book, BookTree, BookSummary, Config, TitleSource } from './types';
 // 统一解析：非 2xx 抛错（含后端 {error} 文案），避免把 404 HTML 灌进 JSON.parse 后静默失败
 const json = async (r: Response) => {
   if (!r.ok) {
-    let msg = `HTTP ${r.status}`;
-    try { const e = await r.json(); if (e?.error) msg = e.error; } catch { /* 非 JSON 响应 */ }
-    throw new Error(msg);
+    throw new Error(await responseErrorMessage(r));
   }
   return r.json();
+};
+
+const responseErrorMessage = async (r: Response) => {
+  let msg = `HTTP ${r.status}`;
+  try { const e = await r.json(); if (e?.error) msg = e.error; } catch { /* 非 JSON 响应 */ }
+  return msg;
 };
 const jpost = (p: string, b: unknown) =>
   fetch(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json);
@@ -60,6 +64,7 @@ export function streamGen(
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body), signal: ctrl.signal,
       });
+      if (!res.ok) throw new Error(await responseErrorMessage(res));
       if (!res.body) throw new Error('无响应流');
       const reader = res.body.getReader();
       const dec = new TextDecoder();
