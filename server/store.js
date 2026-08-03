@@ -86,7 +86,8 @@ export async function listBooks() {
       throw err;  // 其余错误上抛
     }
   }
-  return out;
+  return out.sort((a, b) =>
+    Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || b.id.localeCompare(a.id));
 }
 
 // ——— 序号格式化 ———

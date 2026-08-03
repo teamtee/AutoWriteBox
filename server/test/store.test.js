@@ -36,6 +36,14 @@ test('listBooks 返回摘要', async () => {
   assert.ok(list.every((b) => b.id && b.title && b.updatedAt));
 });
 
+test('listBooks 按 updatedAt 倒序返回', async () => {
+  const old = await store.createBook({ premise: 'old' });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const recent = await store.createBook({ premise: 'recent' });
+  const list = await store.listBooks();
+  assert.deepEqual(list.map((b) => b.id), [recent.id, old.id]);
+});
+
 test('readBook 不存在时抛错', async () => {
   await assert.rejects(() => store.readBook('book_nope'), /BOOK_NOT_FOUND/);
 });
