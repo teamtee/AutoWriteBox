@@ -1,23 +1,21 @@
 import { describe, it, expect } from 'vitest';
-import { findChapter, firstSelectable } from './store';
+import { firstSelectable, selectionExists } from './store';
 import type { BookTree } from './types';
 
 const tree = {
   book: { outline: { content: 'o' } },
   sections: [
     { id: 'section-01', chapters: [
-      { id: 'chapter-01', content: 'C1' }, { id: 'chapter-02', content: 'C2' },
+      { id: 'chapter-01', hasContent: true }, { id: 'chapter-02', hasContent: true },
     ] },
   ],
 } as unknown as BookTree;
 
 describe('store 选中辅助', () => {
-  it('findChapter 命中指定章', () => {
-    const ch = findChapter(tree, { kind: 'chapter', sectionId: 'section-01', chapterId: 'chapter-02' });
-    expect(ch?.content).toBe('C2');
-  });
-  it('findChapter 非章选中返回 null', () => {
-    expect(findChapter(tree, { kind: 'outline' })).toBeNull();
+  it('selectionExists 只接受结构中存在的章节', () => {
+    expect(selectionExists(tree, { kind: 'chapter', sectionId: 'section-01', chapterId: 'chapter-02' })).toBe(true);
+    expect(selectionExists(tree, { kind: 'chapter', sectionId: 'section-01', chapterId: 'chapter-99' })).toBe(false);
+    expect(selectionExists(tree, { kind: 'outline' })).toBe(true);
   });
   it('firstSelectable 有章时返回首章', () => {
     expect(firstSelectable(tree)).toEqual({ kind: 'chapter', sectionId: 'section-01', chapterId: 'chapter-01' });

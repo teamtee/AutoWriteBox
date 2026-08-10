@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toastReducer } from './components/Toast';
+import { toastAnnouncementRole, toastReducer } from './components/Toast';
 import type { ToastItem } from './components/Toast';
 
 const a: ToastItem = { id: 1, type: 'success', msg: 'A' };
@@ -14,5 +14,13 @@ describe('toastReducer', () => {
   });
   it('remove 不存在的 id 原样返回', () => {
     expect(toastReducer([a], { kind: 'remove', id: 99 })).toEqual([a]);
+  });
+});
+
+describe('toastAnnouncementRole', () => {
+  it('uses assertive alerts only for errors', () => {
+    expect(toastAnnouncementRole('error')).toBe('alert');
+    expect(toastAnnouncementRole('success')).toBe('status');
+    expect(toastAnnouncementRole('info')).toBe('status');
   });
 });

@@ -44,6 +44,20 @@ test('migrateVersioned 各形态', () => {
   assert.deepEqual(migrateVersioned(undefined), { versions: [''], cursor: 0 });
 });
 
+test('migrateVersioned 将旧 history 与已落盘的已知 21 版溢出收敛到最新 20 版', () => {
+  const history = Array.from({ length: 20 }, (_, index) => `历史-${index}`);
+  const expected = { versions: [...history.slice(1), '当前'], cursor: 19 };
+
+  assert.deepEqual(migrateVersioned({ content: '当前', history }), expected);
+  assert.deepEqual(migrateVersioned({
+    versions: [...history, '当前'], cursor: 20,
+  }), expected);
+
+  // 不是旧迁移器能够产生的形态，不静默修补，后续严格存储校验仍会报警。
+  const unknownOverflow = { versions: [...history, '当前'], cursor: 0 };
+  assert.equal(migrateVersioned(unknownOverflow), unknownOverflow);
+});
+
 test('parseVersionPath 白名单', () => {
   assert.deepEqual(parseVersionPath('outline'), { type: 'outline' });
   assert.deepEqual(parseVersionPath('core:world'), { type: 'core', field: 'world' });

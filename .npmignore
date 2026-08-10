@@ -1,0 +1,14 @@
+node_modules/
+dist/
+web/dist/
+data/
+certs/
+.env
+.env.*
+*.novelbox.json
+.DS_Store
+.superpowers/
+.worktrees/
+*.tsbuildinfo
+web/vite.config.d.ts
+web/vite.config.js

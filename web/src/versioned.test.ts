@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { currentText, canPrev, canNext, versionLabel, bookSpineColor, normalizeVersioned } from './versioned';
+import { currentText, canPrev, canNext, versionLabel, bookSpineTone, normalizeVersioned, isChapterReviewStale } from './versioned';
+import type { Chapter, ChapterReview } from './types';
 
 describe('versioned 纯函数', () => {
   const v = { versions: ['a', 'b', 'c'], cursor: 1 };
@@ -10,9 +11,50 @@ describe('versioned 纯函数', () => {
     expect(canNext({ versions: ['x'], cursor: 0 })).toBe(false);
   });
   it('versionLabel', () => expect(versionLabel(v)).toBe('第 2 / 3 版'));
-  it('bookSpineColor 稳定且合法 hsl', () => {
-    expect(bookSpineColor('book_1')).toBe(bookSpineColor('book_1'));
-    expect(bookSpineColor('book_1')).toMatch(/^hsl\(\d{1,3}, \d+%, \d+%\)$/);
+  it('bookSpineTone 稳定且落在样式表色阶范围内', () => {
+    expect(bookSpineTone('book_1')).toBe(bookSpineTone('book_1'));
+    expect(bookSpineTone('book_1')).toBeGreaterThanOrEqual(0);
+    expect(bookSpineTone('book_1')).toBeLessThan(12);
+  });
+});
+
+describe('审稿版本识别', () => {
+  const review = {
+    score: 80, verdict: 'ok', issues: [], suggestions: [], sourceCursor: 19,
+    sourceFingerprint: 'old-fingerprint', updatedAt: '2026-08-05T00:00:00.000Z',
+  } satisfies ChapterReview;
+  const chapter = {
+    body: { versions: ['new'], cursor: 19 }, bodyFingerprint: 'new-fingerprint',
+  } as unknown as Chapter;
+
+  it('游标复用时仍能用正文指纹识别旧审稿', () => {
+    expect(isChapterReviewStale(review, chapter)).toBe(true);
+  });
+
+  it('兼容没有指纹的旧审稿数据', () => {
+    expect(isChapterReviewStale({ ...review, sourceFingerprint: undefined }, chapter)).toBe(false);
+  });
+
+  it('故事上下文变化或旧审稿缺少上下文来源时标记为过期', () => {
+    const contextualChapter = {
+      ...chapter,
+      reviewContextRevision: 'current-context',
+    } as Chapter;
+    expect(isChapterReviewStale({
+      ...review,
+      sourceFingerprint: chapter.bodyFingerprint,
+      sourceContextRevision: 'current-context',
+    }, contextualChapter)).toBe(false);
+    expect(isChapterReviewStale({
+      ...review,
+      sourceFingerprint: chapter.bodyFingerprint,
+      sourceContextRevision: 'old-context',
+    }, contextualChapter)).toBe(true);
+    expect(isChapterReviewStale({
+      ...review,
+      sourceFingerprint: chapter.bodyFingerprint,
+      sourceContextRevision: undefined,
+    }, contextualChapter)).toBe(true);
   });
 });
 

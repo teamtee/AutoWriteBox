@@ -1,11 +1,15 @@
 {
   "name": "auto-novel-box",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "start": "node server/index.js",
-    "test": "node --test server/test/*.test.js",
-    "build": "cd web && npm install && npm run build"
+    "start": "node server/launcher-preflight.js runtime && node server/index.js",
+    "test": "node --test --test-concurrency=1 server/test/*.test.js",
+    "build": "npm --prefix web ci --ignore-scripts && node server/launcher-preflight.js frontend-dependencies && npm --prefix web rebuild esbuild@0.25.12 fsevents@2.3.3 --ignore-scripts=false --foreground-scripts && node server/launcher-preflight.js frontend-dependencies && npm --prefix web run build && node server/launcher-preflight.js record-frontend"
   },
   "dependencies": {
     "express": "^4.22.2"

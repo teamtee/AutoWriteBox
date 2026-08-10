@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { parseSectionTitles } from './sections';
+import {
+  MAX_SECTION_PLAN_TITLE_CODE_POINTS, MAX_SECTION_PLAN_TITLES, parseSectionTitles,
+} from './sections';
 
 describe('parseSectionTitles', () => {
   it('解析「第 N 部 · 标题」', () => {
@@ -45,5 +47,21 @@ describe('parseSectionTitles', () => {
     ].join('\n');
 
     expect(parseSectionTitles(t)).toEqual(['蝼蚁', '异火', '燎原']);
+  });
+
+  it('旧协议回退标题按 Unicode 码点截断到服务端上限', () => {
+    const result = parseSectionTitles('第一部 · 😀一二三四五六七八九');
+    expect(result).toEqual(['😀一二三四五六七']);
+    expect(Array.from(result[0])).toHaveLength(MAX_SECTION_PLAN_TITLE_CODE_POINTS);
+  });
+
+  it('旧协议回退最多解析服务端允许的分部数量', () => {
+    const text = Array.from(
+      { length: MAX_SECTION_PLAN_TITLES + 1 },
+      (_, index) => `第${index + 1}部 · 分部${index + 1}`,
+    ).join('\n');
+    const result = parseSectionTitles(text);
+    expect(result).toHaveLength(MAX_SECTION_PLAN_TITLES);
+    expect(result[result.length - 1]).toBe('分部100');
   });
 });

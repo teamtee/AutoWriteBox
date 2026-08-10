@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { finishOwnedAction, runExclusiveAction, startExclusiveAction } from './asyncAction';
+import {
+  createLatestAbortGate, createLatestRequestGate, finishOwnedAction,
+  runExclusiveAction, startExclusiveAction,
+} from './asyncAction';
 
 describe('runExclusiveAction', () => {
   it('ignores a second invocation while the first task is still running', async () => {
@@ -126,5 +129,61 @@ describe('finishOwnedAction', () => {
 
     expect(finished).toBe(true);
     expect(running).toBe(false);
+  });
+});
+
+describe('createLatestRequestGate', () => {
+  it('快速切换时只允许最新请求提交结果', async () => {
+    const gate = createLatestRequestGate();
+    let releaseFirst!: (value: string) => void;
+    const firstResponse = new Promise<string>((resolve) => { releaseFirst = resolve; });
+    let visible = '';
+    const load = async (response: Promise<string>) => {
+      const token = gate.begin();
+      const value = await response;
+      if (gate.owns(token)) visible = value;
+    };
+
+    const first = load(firstResponse);
+    await load(Promise.resolve('第二章'));
+    releaseFirst('第一章迟到结果');
+    await first;
+
+    expect(visible).toBe('第二章');
+  });
+
+  it('离开当前视图后会拒绝未完成请求', () => {
+    const gate = createLatestRequestGate();
+    const token = gate.begin();
+    gate.invalidate();
+    expect(gate.owns(token)).toBe(false);
+  });
+});
+
+describe('createLatestAbortGate', () => {
+  it('aborts the previous request when a newer request begins', () => {
+    const gate = createLatestAbortGate();
+    const first = gate.begin();
+    let ownedAtAbort = true;
+    first.signal.addEventListener('abort', () => {
+      ownedAtAbort = gate.owns(first.token);
+    }, { once: true });
+    const second = gate.begin();
+
+    expect(first.signal.aborted).toBe(true);
+    expect(ownedAtAbort).toBe(false);
+    expect(second.signal.aborted).toBe(false);
+    expect(gate.owns(first.token)).toBe(false);
+    expect(gate.owns(second.token)).toBe(true);
+  });
+
+  it('aborts and invalidates the current request when leaving the view', () => {
+    const gate = createLatestAbortGate();
+    const current = gate.begin();
+
+    gate.invalidate();
+
+    expect(current.signal.aborted).toBe(true);
+    expect(gate.owns(current.token)).toBe(false);
   });
 });

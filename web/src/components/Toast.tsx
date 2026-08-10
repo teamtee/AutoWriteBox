@@ -1,4 +1,6 @@
-import { createContext, useCallback, useContext, useReducer, useRef } from 'react';
+import {
+  createContext, useCallback, useContext, useEffect, useReducer, useRef,
+} from 'react';
 import type { ReactNode } from 'react';
 
 export type ToastType = 'success' | 'error' | 'info';
@@ -19,6 +21,27 @@ export interface ToastApi {
   info(msg: string): void;
 }
 
+export function toastAnnouncementRole(type: ToastType): 'alert' | 'status' {
+  return type === 'error' ? 'alert' : 'status';
+}
+
+export function ToastMessage({
+  toast, onClose,
+}: {
+  toast: ToastItem;
+  onClose(): void;
+}) {
+  return (
+    <div
+      className={`toast sketch ${toast.type}`}
+      role={toastAnnouncementRole(toast.type)}
+      aria-atomic="true">
+      <span>{toast.msg}</span>
+      <button type="button" className="toast-x" aria-label="关闭通知" onClick={onClose}>×</button>
+    </div>
+  );
+}
+
 const Ctx = createContext<ToastApi | null>(null);
 
 export function useToast(): ToastApi {
@@ -30,13 +53,23 @@ export function useToast(): ToastApi {
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [items, dispatch] = useReducer(toastReducer, []);
   const seq = useRef(0);
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+
+  useEffect(() => () => {
+    timers.current.forEach(clearTimeout);
+    timers.current.clear();
+  }, []);
 
   const push = useCallback((type: ToastType, msg: string) => {
     const id = ++seq.current;
     dispatch({ kind: 'add', toast: { id, type, msg } });
     // error 停留更久，需要用户注意
     const ttl = type === 'error' ? 6000 : 3500;
-    setTimeout(() => dispatch({ kind: 'remove', id }), ttl);
+    const timer = setTimeout(() => {
+      timers.current.delete(timer);
+      dispatch({ kind: 'remove', id });
+    }, ttl);
+    timers.current.add(timer);
   }, []);
 
   const api = useRef<ToastApi>({
@@ -50,10 +83,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       <div className="toast-stack">
         {items.map((t) => (
-          <div key={t.id} className={`toast sketch ${t.type}`}>
-            <span>{t.msg}</span>
-            <button className="toast-x" onClick={() => dispatch({ kind: 'remove', id: t.id })}>×</button>
-          </div>
+          <ToastMessage
+            key={t.id}
+            toast={t}
+            onClose={() => dispatch({ kind: 'remove', id: t.id })} />
         ))}
       </div>
     </Ctx.Provider>

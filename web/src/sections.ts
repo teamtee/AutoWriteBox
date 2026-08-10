@@ -5,6 +5,13 @@
 // 无标题时用「第 N 部」原文兜底。
 const CN_NUM = '零一二三四五六七八九十百千两';
 const NUM_RE = `\\d+|[${CN_NUM}]+`;
+export const MAX_SECTION_PLAN_TITLES = 100;
+export const MAX_SECTION_PLAN_TITLE_CODE_POINTS = 8;
+
+function normalizeSectionPlanTitle(value: string): string {
+  return Array.from(value.trim()).slice(0, MAX_SECTION_PLAN_TITLE_CODE_POINTS).join('');
+}
+
 export function parseSectionTitles(text: string): string[] {
   const out: string[] = [];
   for (const raw of text.split('\n')) {
@@ -14,7 +21,9 @@ export function parseSectionTitles(text: string): string[] {
     const num = m[1];
     const title = m[2].split(/[:：]/, 1)[0].trim();
     const fallback = /^\d+$/.test(num) ? `第 ${num} 部` : `第${num}部`;
-    out.push(title || fallback);
+    const normalized = normalizeSectionPlanTitle(title || fallback);
+    if (normalized) out.push(normalized);
+    if (out.length >= MAX_SECTION_PLAN_TITLES) break;
   }
   return out;
 }

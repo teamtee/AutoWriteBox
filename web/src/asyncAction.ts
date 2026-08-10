@@ -49,3 +49,41 @@ export function finishOwnedAction({
   finish();
   return true;
 }
+
+export function createLatestRequestGate() {
+  let generation = 0;
+  return {
+    begin() {
+      generation += 1;
+      return generation;
+    },
+    owns(token: number) {
+      return token === generation;
+    },
+    invalidate() {
+      generation += 1;
+    },
+  };
+}
+
+export function createLatestAbortGate() {
+  const gate = createLatestRequestGate();
+  let controller: AbortController | null = null;
+  return {
+    begin() {
+      // 先转移所有权再触发 abort，确保旧请求的拒绝回调即使立即执行也只会被视为过期。
+      const token = gate.begin();
+      controller?.abort();
+      controller = new AbortController();
+      return { token, signal: controller.signal };
+    },
+    owns(token: number) {
+      return gate.owns(token);
+    },
+    invalidate() {
+      gate.invalidate();
+      controller?.abort();
+      controller = null;
+    },
+  };
+}

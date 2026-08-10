@@ -15,19 +15,36 @@ export function Sidebar({ tree, selection, disabled, onSelect, onAddSection, onA
   return (
     <aside className={`sidebar sketch ${disabled ? 'locked' : ''}`}>
       <div className="side-tabs">
-        <div className={`side-tab ${active({ kind: 'outline' })} ${disabled ? 'disabled' : ''}`} onClick={() => go({ kind: 'outline' })}>📜 全书大纲</div>
-        <div className={`side-tab ${active({ kind: 'core' })} ${disabled ? 'disabled' : ''}`} onClick={() => go({ kind: 'core' })}>🧭 核心设定</div>
+        <button type="button"
+          className={`side-tab ${active({ kind: 'outline' })} ${disabled ? 'disabled' : ''}`}
+          disabled={disabled}
+          aria-current={selection.kind === 'outline' ? 'page' : undefined}
+          onClick={() => go({ kind: 'outline' })}>📜 全书大纲</button>
+        <button type="button"
+          className={`side-tab ${active({ kind: 'core' })} ${disabled ? 'disabled' : ''}`}
+          disabled={disabled}
+          aria-current={selection.kind === 'core' ? 'page' : undefined}
+          onClick={() => go({ kind: 'core' })}>🧭 核心设定</button>
+        <button type="button"
+          className={`side-tab ${active({ kind: 'serialization' })} ${disabled ? 'disabled' : ''}`}
+          disabled={disabled}
+          aria-current={selection.kind === 'serialization' ? 'page' : undefined}
+          onClick={() => go({ kind: 'serialization' })}>📅 连载管理</button>
       </div>
       {tree.sections.map((s) => (
         <div key={s.id} className="section">
           <div className="section-title">{formatIndexedTitle(s.index, '部', s.title)}</div>
           <div className="chapter-list">
             {s.chapters.map((c) => (
-              <div key={c.id}
+              <button type="button" key={c.id}
                 className={`${cls({ kind: 'chapter', sectionId: s.id, chapterId: c.id })} chapter`}
+                disabled={disabled}
+                aria-current={selection.kind === 'chapter'
+                  && selection.sectionId === s.id && selection.chapterId === c.id
+                  ? 'page' : undefined}
                 onClick={() => go({ kind: 'chapter', sectionId: s.id, chapterId: c.id })}>
-                <span>{formatIndexedTitle(c.index, '章', c.title)}</span>{c.content ? <span className="done">✓</span> : null}
-              </div>
+                <span>{formatIndexedTitle(c.index, '章', c.title)}</span>{c.hasContent ? <span className="done">✓</span> : null}
+              </button>
             ))}
           </div>
           <button className="hbtn dashed mini" disabled={disabled} onClick={() => onAddChapter(s.id)}>＋ 加章</button>

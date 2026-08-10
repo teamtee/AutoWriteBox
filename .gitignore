@@ -2,6 +2,9 @@ node_modules/
 dist/
 data/
 .env
+.env.*
+!.env.example
+*.novelbox.json
 .DS_Store
 .superpowers/
 .worktrees/

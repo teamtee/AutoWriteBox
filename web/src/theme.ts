@@ -13,11 +13,21 @@ export function nextTheme(cur: Theme): Theme {
 }
 
 export function getTheme(): Theme {
-  return normalizeTheme(localStorage.getItem(KEY));
+  try {
+    return normalizeTheme(globalThis.localStorage?.getItem(KEY) ?? null);
+  } catch {
+    // 隐私模式、沙箱 iframe 或浏览器策略可能让 localStorage 访问直接
+    // 抛出 SecurityError；主题偏好不可用不能阻止整个应用启动。
+    return 'paper';
+  }
 }
 
 export function setTheme(t: Theme): void {
-  localStorage.setItem(KEY, t);
+  try {
+    globalThis.localStorage?.setItem(KEY, t);
+  } catch {
+    // 仍应用当前会话的主题，仅放弃持久化。
+  }
   document.documentElement.setAttribute('data-theme', t);
 }
 

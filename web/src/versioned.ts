@@ -1,4 +1,4 @@
-import type { Versioned } from './types';
+import type { Chapter, ChapterReview, Versioned } from './types';
 
 // 容错归一：兼容 {versions,cursor} / 老结构 {content,history} / 字符串 / 空。
 // 保证即便后端返回异常/老结构（如误连了旧进程），UI 也不会因读 undefined.versions 而白屏。
@@ -39,9 +39,20 @@ export const versionLabel = (v: Versioned): string => {
   return `第 ${n.cursor + 1} / ${n.versions.length} 版`;
 };
 
-// 按书 id 生成稳定色相，纯 CSS 书脊色（无图片请求）
-export function bookSpineColor(id: string): string {
+export function isChapterReviewStale(review: ChapterReview, chapter: Chapter): boolean {
+  if (chapter.reviewContextRevision
+    && review.sourceContextRevision !== chapter.reviewContextRevision) {
+    return true;
+  }
+  if (review.sourceFingerprint && chapter.bodyFingerprint) {
+    return review.sourceFingerprint !== chapter.bodyFingerprint;
+  }
+  return review.sourceCursor !== chapter.body.cursor;
+}
+
+// 按书 id 生成稳定色阶，由样式表提供颜色；避免为动态 style 放宽 CSP。
+export function bookSpineTone(id: string): number {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
-  return `hsl(${h}, 45%, 60%)`;
+  return Math.floor(h / 30);
 }

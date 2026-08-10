@@ -1,15 +1,16 @@
-import { test, beforeEach } from 'node:test';
+import { test, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as store from '../store.js';
+import { cleanupTestTempDirs, makeTestTempDir } from './test-temp-dir.js';
 
 let root;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'novelbox-title-'));
+  root = makeTestTempDir('novelbox-title-');
   store.setDataRoot(root);
 });
+afterEach(cleanupTestTempDirs);
 
 test('新建书/部/章写入 default titleSource 和空的纯部章标题', async () => {
   const b = await store.createBook({ premise: '一个赛博侦探故事' });

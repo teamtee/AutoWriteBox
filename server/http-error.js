@@ -1,0 +1,162 @@
+const FILESYSTEM_ERRORS = new Map([
+  ['ENOSPC', { status: 507, error: 'STORAGE_FULL' }],
+  ['EDQUOT', { status: 507, error: 'STORAGE_FULL' }],
+  ['EACCES', { status: 500, error: 'STORAGE_PERMISSION_DENIED' }],
+  ['EPERM', { status: 500, error: 'STORAGE_PERMISSION_DENIED' }],
+  ['EROFS', { status: 500, error: 'STORAGE_PERMISSION_DENIED' }],
+  ['EIO', { status: 500, error: 'STORAGE_IO_ERROR' }],
+  ['ESTALE', { status: 500, error: 'STORAGE_IO_ERROR' }],
+  ['ENXIO', { status: 500, error: 'STORAGE_IO_ERROR' }],
+  ['EMFILE', { status: 503, error: 'STORAGE_FILE_LIMIT' }],
+  ['ENFILE', { status: 503, error: 'STORAGE_FILE_LIMIT' }],
+  ['ENOENT', { status: 500, error: 'STORAGE_FILE_MISSING' }],
+  ['ENOTDIR', { status: 500, error: 'STORAGE_PATH_INVALID' }],
+  ['EISDIR', { status: 500, error: 'STORAGE_PATH_INVALID' }],
+  ['EEXIST', { status: 500, error: 'STORAGE_PATH_INVALID' }],
+]);
+
+const NOT_FOUND_ERRORS = new Set([
+  'NOT_FOUND', 'BOOK_NOT_FOUND', 'SECTION_NOT_FOUND', 'CHAPTER_NOT_FOUND',
+  'TRASH_BOOK_NOT_FOUND', 'BACKUP_DOWNLOAD_NOT_FOUND',
+  'ASSET_NOT_FOUND', 'MEMORY_CANDIDATE_NOT_FOUND', 'MEMORY_FACT_NOT_FOUND',
+  'API_PROFILE_NOT_FOUND', 'STAGE_SUMMARY_NOT_FOUND',
+  'PLATFORM_CONFIRMATION_NOT_FOUND',
+]);
+const CONFLICT_ERRORS = new Set([
+  'BOOK_ALREADY_EXISTS', 'BOOK_TITLE_CONFLICT', 'BOOK_DELETE_CONFLICT',
+  'REVIEW_STALE', 'REVIEW_CONTEXT_STALE', 'VERSION_CONFLICT',
+  'NEXT_SECTION_CONFLICT', 'NEXT_CHAPTER_CONFLICT', 'GENERATION_CONTEXT_CONFLICT',
+  'BACKUP_CHANGED_DURING_EXPORT', 'CONFIG_CONFLICT', 'STRUCTURE_TRANSACTION_RECOVERED',
+  'ASSET_CONFLICT', 'ASSET_DUPLICATE', 'MEMORY_CONFLICT', 'MEMORY_DECISION_CONFLICT',
+  'MEMORY_REVISION_CONFLICT', 'MEMORY_SOURCE_STALE',
+  'MEMORY_SOURCE_UNPUBLISHED', 'PUBLICATION_STALE',
+  'API_PROFILES_CONFLICT',
+  'SERIALIZATION_CONFLICT',
+  'PLATFORM_CONFIRMATION_DUPLICATE',
+  'STAGE_SUMMARY_CONFLICT', 'STAGE_SUMMARY_SOURCE_STALE', 'STAGE_SUMMARY_FROZEN',
+]);
+const PAYLOAD_TOO_LARGE_ERRORS = new Set([
+  'REQUEST_TOO_LARGE', 'BACKUP_TOO_LARGE', 'ASSET_SOURCE_TOO_LARGE',
+  'ASSET_EXCERPT_TOO_LARGE', 'MANUSCRIPT_TOO_LARGE',
+]);
+const BAD_REQUEST_ERRORS = new Set([
+  'INVALID_JSON',
+  'BAD_ID', 'BAD_TITLE', 'BAD_PREMISE', 'BAD_BOOK_CREATION_ID',
+  'BAD_BOOK_TITLE_ANCHOR', 'BAD_BOOK_DELETE_ANCHOR',
+  'BAD_NEXT_SECTION_ANCHOR', 'BAD_NEXT_CHAPTER_ANCHOR',
+  'BAD_SECTION_OUTLINE',
+  'BAD_REVIEW_ANCHOR', 'BAD_GENERATION_CONTEXT_REVISION',
+  'BAD_VERSION_REVISION', 'BAD_VERSION_REWRITE_PATH',
+  'BAD_PATH', 'BAD_DELTA', 'BAD_TEXT', 'BAD_MODE', 'BAD_WHIP',
+  'BAD_CONFIG_REVISION', 'BAD_CONFIG_PATCH', 'BAD_CONFIG_FIELD',
+  'BAD_CONFIG_TEXT_FIELD', 'BAD_CHAPTER_WORD_TARGET', 'BAD_REQUEST_TIMEOUT',
+  'PREMISE_TOO_LARGE', 'TITLE_TOO_LARGE', 'TEXT_TOO_LARGE',
+  'WHIP_TOO_LARGE', 'CONFIG_TEXT_TOO_LARGE',
+  'BOOK_SECTION_LIMIT', 'SECTION_CHAPTER_LIMIT', 'BOOK_CHAPTER_LIMIT',
+  'BOOK_LIBRARY_LIMIT', 'TRASH_BOOK_LIMIT', 'CHAPTER_EMPTY',
+  'BAD_ASSET_ID', 'BAD_ASSET_NAME', 'BAD_ASSET_SOURCE', 'BAD_ASSET_SOURCE_KIND',
+  'BAD_ASSET_REVISION', 'ASSET_NAME_TOO_LARGE', 'ASSET_SOURCE_NAME_TOO_LARGE',
+  'BAD_ASSET_METADATA', 'BAD_ASSET_REFERENCE_URL', 'BAD_ASSET_RIGHTS_NOTE',
+  'BAD_ASSET_BINDING', 'ASSET_LIBRARY_LIMIT', 'ASSET_BOOK_BINDING_LIMIT',
+  'ASSET_NATIVE_SOURCE_UNPUBLISHED',
+  'BAD_MEMORY_CANDIDATE_ID', 'BAD_MEMORY_FACT_ID', 'BAD_MEMORY_DECISION', 'BAD_MEMORY_BODY_FINGERPRINT',
+  'BAD_MEMORY_REVISION', 'MEMORY_FACT_LIMIT', 'MEMORY_REJECTION_LIMIT',
+  'BAD_API_PROFILE', 'BAD_API_PROFILE_ID', 'BAD_API_PROFILE_NAME',
+  'BAD_API_PROFILE_MODELS', 'BAD_API_PROFILE_MODEL',
+  'BAD_API_PROFILES_REVISION', 'API_PROFILE_LIMIT', 'BAD_MODEL_DISCOVERY_TARGET',
+  'BAD_API_TASK_ROUTES', 'BAD_API_MODEL_TASK',
+  'BAD_API_BOOK_BINDING', 'API_BOOK_BINDING_LIMIT',
+  'BAD_STAGE_SUMMARY_ID', 'BAD_STAGE_SUMMARY_TITLE', 'BAD_STAGE_SUMMARY_RANGE',
+  'BAD_STAGE_SUMMARY_TEXT', 'BAD_STAGE_SUMMARY_STATUS',
+  'BAD_STAGE_SUMMARY_REVISION', 'BAD_STAGE_SUMMARY_SOURCE',
+  'STAGE_SUMMARY_RANGE_TOO_LARGE', 'STAGE_SUMMARY_TEXT_TOO_LARGE',
+  'STAGE_SUMMARY_SOURCE_EMPTY', 'STAGE_SUMMARY_LIMIT',
+  'BAD_PUBLICATION_ANCHOR',
+  'BAD_DAILY_WORD_GOAL', 'BAD_SERIALIZATION_REVISION',
+  'BAD_PLATFORM_CONFIRMATION', 'BAD_PLATFORM_CONFIRMATION_ID',
+  'PLATFORM_CONFIRMATION_LIMIT',
+  'BAD_MANUSCRIPT_SOURCE', 'MANUSCRIPT_EMPTY',
+  'BACKUP_INVALID', 'BACKUP_INVALID_JSON',
+  'LLM_BASE_URL_REQUIRED', 'LLM_MODEL_REQUIRED', 'LLM_BASE_URL_INVALID',
+  'LLM_MODEL_INVALID', 'LLM_API_KEY_INVALID',
+  'LLM_CONFIG_TOO_LARGE', 'LLM_INPUT_INVALID', 'LLM_INPUT_TOO_LARGE',
+  'LLM_INSECURE_API_KEY_TRANSPORT', 'API_KEY_REQUIRED_FOR_BASE_URL_CHANGE',
+]);
+const STORAGE_SERVER_ERRORS = new Set([
+  'STORAGE_FILE_TOO_LARGE', 'STORAGE_DATA_INVALID',
+  'STORAGE_PATH_INVALID', 'STORAGE_PATH_UNSAFE', 'STORAGE_DIRECTORY_LIMIT_EXCEEDED',
+  // 导出请求本身没有问题；这两类错误表示服务端现有作品无法
+  // 通过备份边界校验，必须按本地存储故障上报，而不是客户端 400。
+  'BACKUP_BOOK_INVALID', 'BACKUP_SECTION_INVALID',
+  // 回收站条目来自服务端本地存储；损坏不是恢复请求的参数错误。
+  'TRASH_BOOK_INVALID',
+]);
+const STORAGE_DATA_ERRORS = new Set([
+  'BOOK_SECTIONS_INVALID', 'BOOK_SECTIONS_LIMIT_EXCEEDED',
+  'SECTION_CHAPTERS_INVALID', 'SECTION_CHAPTERS_LIMIT_EXCEEDED',
+  'BOOK_CHAPTERS_LIMIT_EXCEEDED', 'CHAPTER_ID_MISMATCH',
+]);
+const BAD_GATEWAY_ERRORS = new Set([
+  'LLM_EMPTY_BODY', 'LLM_EMPTY_RESPONSE', 'LLM_RESPONSE_TOO_LARGE',
+  'LLM_STREAM_TOO_LARGE', 'LLM_STREAM_BUFFER_TOO_LARGE',
+  'LLM_STREAM_INCOMPLETE', 'LLM_REDIRECT_NOT_ALLOWED', 'REVIEW_FAILED',
+  'LLM_MODELS_RESPONSE_INVALID', 'LLM_MODELS_RESPONSE_TOO_LARGE',
+  'ASSET_EXTRACTION_FAILED', 'STAGE_SUMMARY_FAILED', 'MEMORY_RECOMPUTE_FAILED',
+]);
+
+export function publicHttpError(error) {
+  const filesystem = FILESYSTEM_ERRORS.get(error?.code);
+  if (filesystem) return filesystem;
+  // Express 在路由参数含损坏的百分号编码时抛出带 400 状态的 URIError。
+  // 这是客户端路径输入错误，不应被未知异常兜底误报成服务端 500。
+  if (error instanceof URIError
+    && (error?.status === 400 || error?.statusCode === 400)) {
+    return { status: 400, error: 'BAD_ID' };
+  }
+  if (error instanceof SyntaxError) return { status: 500, error: 'STORAGE_JSON_INVALID' };
+  if (error instanceof TypeError || error instanceof RangeError) {
+    return { status: 500, error: 'INTERNAL_ERROR' };
+  }
+
+  const message = typeof error?.message === 'string'
+    ? error.message
+    : typeof error === 'string' ? error : '';
+  // 业务错误只允许稳定的大写错误码（LLM 错误可带已经清洗过的短详情）公开。
+  const isPublicCode = /^[A-Z][A-Z0-9_]{0,127}(?:: [^\r\n]{1,300})?$/.test(message);
+  if (!isPublicCode) return { status: 500, error: 'INTERNAL_ERROR' };
+  if (NOT_FOUND_ERRORS.has(message)) return { status: 404, error: message };
+  if (CONFLICT_ERRORS.has(message)) return { status: 409, error: message };
+  if (PAYLOAD_TOO_LARGE_ERRORS.has(message)) return { status: 413, error: message };
+  if (STORAGE_SERVER_ERRORS.has(message)) return { status: 500, error: message };
+  if (STORAGE_DATA_ERRORS.has(message)) return { status: 500, error: 'STORAGE_DATA_INVALID' };
+  // 残留结构事务损坏、不可读或与目标文件冲突都属于磁盘状态异常，不能
+  // 伪装成客户端 400。RECOVERED 已在上方作为可刷新重试的 409 单独处理。
+  if (message.startsWith('STRUCTURE_TRANSACTION_')
+    || message.startsWith('CHAPTER_DIGEST_TRANSACTION_')) {
+    return { status: 500, error: 'STORAGE_DATA_INVALID' };
+  }
+  if (message === 'LLM_BUSY' || message === 'BACKUP_EXPORT_BUSY') {
+    return { status: 429, error: message };
+  }
+  if (message === 'LLM_TIMEOUT') return { status: 504, error: message };
+  if (BAD_GATEWAY_ERRORS.has(message)
+    || /^LLM_HTTP_\d{3}(?:: |$)/.test(message)
+    || message === 'LLM_NETWORK_ERROR' || message.startsWith('LLM_NETWORK_ERROR: ')
+    || message.startsWith('LLM_STREAM_ERROR: ')
+    || message.startsWith('LLM_FINISH_')) {
+    return { status: 502, error: message };
+  }
+  if (BAD_REQUEST_ERRORS.has(message)) return { status: 400, error: message };
+  // 大写格式只能防止路径、堆栈和换行泄漏，不能证明它是公开业务错误。
+  // 未登记的稳定码默认视为实现细节，避免内部不变量故障被误报为客户端 400。
+  return { status: 500, error: 'INTERNAL_ERROR' };
+}
+
+export function publicErrorCode(error) {
+  return publicHttpError(error).error;
+}
+
+export function sendJsonError(res, error) {
+  const mapped = publicHttpError(error);
+  return res.status(mapped.status).json({ error: mapped.error });
+}
