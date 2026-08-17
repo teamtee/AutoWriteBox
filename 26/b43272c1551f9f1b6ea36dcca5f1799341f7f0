@@ -1,0 +1,276 @@
+server/store.js
+  h_2ea779daa8153d 592-595,652,654-659,663-668,710
+server/test/prompts.test.js
+  h_2ea779daa8153d 493-501
+server/routes/books.js
+  s_aca8d3601d736b::t_ecb50b00a9d533 864-884
+  s_aca8d3601d736b::t_407eadd36f3442 861-863
+  s_aca8d3601d736b::t_3db5daa04369a0 885-887
+README.md
+  s_25eee1fe0aa020::t_1eaa0585b53a43 5-6,49-55,57-59,61,100-101,104-106
+docs/superpowers/plans/2026-07-29-自动小说盒子-基础与后端.md
+  s_25eee1fe0aa020::t_8201596ea40b7d 1-1057
+docs/superpowers/plans/2026-07-29-自动小说盒子-生成前端与验收.md
+  s_25eee1fe0aa020::t_480a3211621821 1-992
+docs/superpowers/plans/2026-07-29-自动小说盒子.md
+  s_25eee1fe0aa020::t_f8c6c3100d756c 3,5-10,12
+docs/superpowers/plans/README.md
+  s_25eee1fe0aa020::t_9f70bd73ddc81d 1-14
+docs/架构与重构路线图.md
+  s_25eee1fe0aa020::t_39936fb3597bc4 1-57
+docs/真实作品十章盲读验收.md
+  s_25eee1fe0aa020::t_cd35435a09bee4 1-117
+docs/笼中火种-前六章候选联合审读.md
+  s_25eee1fe0aa020::t_db0a66a8b29511 1-98
+docs/笼中火种-前六章盲读记录空表.md
+  s_25eee1fe0aa020::t_cc4e6f867c8f17 1-98
+docs/笼中火种-第01章十二个火种-正文候选.txt
+  s_25eee1fe0aa020::t_b74f24fe250bb6 1-228
+docs/笼中火种-第01章正文候选审读.md
+  s_25eee1fe0aa020::t_1da30e6d46aadf 1-65
+docs/笼中火种-第02章狼群循味-正文候选.txt
+  s_25eee1fe0aa020::t_d846806f5a2eb7 1-289
+docs/笼中火种-第03章葬麦-正文候选.txt
+  s_25eee1fe0aa020::t_fc4af0bf1b38c3 1-283
+docs/笼中火种-第04章第五道刻痕-正文候选.txt
+  s_25eee1fe0aa020::t_aa0d40803a4ff1 1-379
+docs/笼中火种-第05章水边的客人-正文候选.txt
+  s_25eee1fe0aa020::t_4c5d11ccb04464 1-419
+docs/笼中火种-第06章被写好的敌人-正文候选.txt
+  s_25eee1fe0aa020::t_44bf1cec1951a2 1-391
+docs/笼中火种-第07章三百人的山下-正文候选.txt
+  s_25eee1fe0aa020::t_f1c3b5201ca5fb 1-367
+docs/笼中火种-第08章S级展演-正文候选.txt
+  s_25eee1fe0aa020::t_4bcd17f12b5e3a 1-293
+docs/笼中火种-第09章种麦-正文候选.txt
+  s_25eee1fe0aa020::t_8249833ef4f26a 1-341
+docs/笼中火种-第10章第二次火种-正文候选.txt
+  s_25eee1fe0aa020::t_ef8e649b1e7c2c 1-345
+docs/笼中火种-第11章腿还在-正文候选.txt
+  s_25eee1fe0aa020::t_9e2c9146903bf4 1-303
+docs/笼中火种-第12章六年前的烟-正文候选.txt
+  s_25eee1fe0aa020::t_e8ca4bc675d074 1-273
+docs/笼中火种-第13章苦井未苦-正文候选.txt
+  s_25eee1fe0aa020::t_f2286a231d231b 1-275
+docs/笼中火种-第14章第十三个火种-正文候选.txt
+  s_25eee1fe0aa020::t_a7ed4eee913161 1-213
+docs/笼中火种-第15章提前六年的旱季-正文候选.txt
+  s_25eee1fe0aa020::t_2bf23dcb0fa8ab 1-211
+docs/笼中火种-第16章先挖渠后谈敌人-正文候选.txt
+  s_25eee1fe0aa020::t_7d85981cf44231 1-173
+docs/笼中火种-第17章一场没有死人的战争-正文候选.txt
+  s_25eee1fe0aa020::t_b3786d78f97f74 1-227
+docs/笼中火种-第18章没有奖励-正文候选.txt
+  s_25eee1fe0aa020::t_411f23624277f0 1-155
+docs/笼中火种-第19章空白的人-正文候选.txt
+  s_25eee1fe0aa020::t_9b23791f9dbd67 1-273
+docs/笼中火种-第20章零样本-正文候选.txt
+  s_25eee1fe0aa020::t_bae77c1a8dc198 1-289
+docs/笼中火种-第21章API创作任务书.md
+  s_25eee1fe0aa020::t_f834b483cff116 1-53
+docs/笼中火种-第21章API生成任务.json
+  s_25eee1fe0aa020::t_c722c21dc959c8 1-22
+docs/笼中火种-第21至30章写前承诺账本.md
+  s_25eee1fe0aa020::t_91557a2f7af506 1-59
+docs/笼中火种-第一阶段十章正文候选清单.json
+  s_25eee1fe0aa020::t_c60c53d96717e7 1-95
+docs/笼中火种-第一阶段十章正文联合审读.md
+  s_25eee1fe0aa020::t_5b9fc04b98a016 1-112
+docs/笼中火种-第一阶段十章盲读稿.txt
+  s_25eee1fe0aa020::t_e74954e384e1f4 1-3376
+docs/笼中火种-第一阶段十章盲读记录空表.md
+  s_25eee1fe0aa020::t_e5ac9e5fe1ad02 1-79
+docs/笼中火种-第一阶段十章策划候选.json
+  s_25eee1fe0aa020::t_9b18abf19b3e41 1-301
+docs/笼中火种-第一阶段十章策划审计.md
+  s_25eee1fe0aa020::t_0405d505f58e6d 1-103
+docs/笼中火种-第三阶段第21至30章策划候选.json
+  s_25eee1fe0aa020::t_2e783776d2da54 1-340
+docs/笼中火种-第二循环第11至20章正文候选清单.json
+  s_25eee1fe0aa020::t_f701bcbfd659e5 1-97
+docs/笼中火种-第二循环第11至20章正文联合审读.md
+  s_25eee1fe0aa020::t_a3f1216684fe48 1-112
+docs/笼中火种-第二循环第11至20章策划候选.json
+  s_25eee1fe0aa020::t_1fb034897c61ce 1-309
+docs/笼中火种-第二循环第11至20章策划审计.md
+  s_25eee1fe0aa020::t_5bf5e08056eac3 1-92
+docs/笼中火种-黄金三章候选联合审读.md
+  s_25eee1fe0aa020::t_62418efc9fc2a2 1-98
+docs/笼中火种-黄金三章盲读记录空表.md
+  s_25eee1fe0aa020::t_106e274de855cc 1-89
+scripts/api-editorial-loop.js
+  s_25eee1fe0aa020::t_478044115b8e13 1-216
+scripts/export-blind-read.js
+  s_25eee1fe0aa020::t_4b076cbc237f4a 1-72
+server/api-editorial-loop.js
+  s_25eee1fe0aa020::t_bf009bdeeb1026 1-245
+server/chapter-review-promise-schema.js
+  s_25eee1fe0aa020::t_8d252051c772ca 1-151
+server/chapter-review-world-schema.js
+  s_25eee1fe0aa020::t_5bf45340beab17 1-59
+server/chapter-rhythm.js
+  s_25eee1fe0aa020::t_e2ee4f6af151ee 1-130
+server/character-craft-schema.js
+  s_25eee1fe0aa020::t_2aacd67a8d921a 1-277
+server/routes/README.md
+  s_25eee1fe0aa020::t_197ed15721fa4e 1-11
+server/section-plan-schema.js
+  s_25eee1fe0aa020::t_fdf86b0b8772dc 1-115
+server/section-world-contract.js
+  s_25eee1fe0aa020::t_de7f1f91646ff6 1-76
+server/store/README.md
+  s_25eee1fe0aa020::t_d80bf70e60c87a 1-24
+server/store/abort.js
+  s_25eee1fe0aa020::t_52f6ade801903e 1-5
+server/store/backups.js
+  s_25eee1fe0aa020::t_f4f53876adbdb5 1-717
+server/store/character-craft.js
+  s_25eee1fe0aa020::t_549d18986e78df 1-95
+server/store/diagnostics.js
+  s_25eee1fe0aa020::t_90b0c06ceb3408 1-704
+server/store/inspection.js
+  s_25eee1fe0aa020::t_5cc1ac6efb6917 1-68
+server/store/instance-lock.js
+  s_25eee1fe0aa020::t_ce80ee51832e58 1-387
+server/store/io.js
+  s_25eee1fe0aa020::t_c799ded5b01da3 1-407
+server/store/json-writer.js
+  s_25eee1fe0aa020::t_b5c54e21a21473 1-60
+server/store/promise-ledger.js
+  s_25eee1fe0aa020::t_5a36cf8f682c99 1-100
+server/store/structure-constants.js
+  s_25eee1fe0aa020::t_5ad7d59481ef67 1-9
+server/store/trash.js
+  s_25eee1fe0aa020::t_200be70c9a85e7 1-448
+server/store/writing-assets.js
+  s_25eee1fe0aa020::t_13ab8311eb5e30 1-428
+server/story-engine-schema.js
+  s_25eee1fe0aa020::t_1529f2d43194c2 1-49
+server/test/architecture.test.js
+  s_25eee1fe0aa020::t_32ce0408b2fc77 1-140
+server/test/assets.test.js
+  s_25eee1fe0aa020::t_3fe50c91d4b138 241,247-248,272
+server/test/backup-http.test.js
+  s_25eee1fe0aa020::t_f080b464846d70 1-257
+server/test/backup.test.js
+  s_25eee1fe0aa020::t_d8d9955cdd9fd8 38-46,53-56,194-196,201-204
+server/test/chapter-plan-review-http.test.js
+  s_25eee1fe0aa020::t_1b5f303aca03a9 1-74
+server/test/chapter-plan-review.test.js
+  s_25eee1fe0aa020::t_87c2103869a009 1-109
+server/test/chapter-review-promise.test.js
+  s_25eee1fe0aa020::t_457c3bfc45b97c 1-298
+server/test/chapter-rhythm.test.js
+  s_25eee1fe0aa020::t_a505a8fda3a91d 1-70
+server/test/character-craft.test.js
+  s_25eee1fe0aa020::t_2eb2e3c97ddaac 1-237
+server/test/gen.test.js
+  s_25eee1fe0aa020::t_516f876695083d 16,54,574,578,611,615
+server/test/llm-route.test.js
+  s_25eee1fe0aa020::t_64a8a85780aa86 56,72-73
+server/test/section-plan-fixture.js
+  s_25eee1fe0aa020::t_7808c0d5294499 1-41
+server/test/section-plan-world.test.js
+  s_25eee1fe0aa020::t_498dd14b236dce 1-129
+server/test/section-world-contract.test.js
+  s_25eee1fe0aa020::t_eea98a0dcf8442 1-70
+server/test/story-engine.test.js
+  s_25eee1fe0aa020::t_45c77e4d0bd2b8 1-109
+server/test/world-progress.test.js
+  s_25eee1fe0aa020::t_bd259798b554e5 1-270
+server/world-progress-schema.js
+  s_25eee1fe0aa020::t_9cda935e4721bc 1-185
+web/src/README.md
+  s_25eee1fe0aa020::t_5c2698d4a5b4db 1-16
+web/src/api-sse.ts
+  s_25eee1fe0aa020::t_cd047a559f30bf 1-206
+web/src/character-craft-api.test.ts
+  s_25eee1fe0aa020::t_7a6989d3298e87 1-68
+web/src/character-craft-api.ts
+  s_25eee1fe0aa020::t_eaad7d35f36284 1-50
+web/src/components/Actions.test.tsx
+  s_25eee1fe0aa020::t_ebc0f7b6e1b9ca 41,45,56-57
+web/src/components/Actions.tsx
+  s_25eee1fe0aa020::t_c546a7b6ebac97 19-20,45
+web/src/components/ChapterAssetSceneSelector.tsx
+  s_25eee1fe0aa020::t_bb3bf71948b40b 1,9,23-31,34,43,49-51,53-66,70-82,85-88,95-97,102,104-106,108-116,118,120-123,126-129,134-136,143,145-147,151-152,158-164,166-169,171-174,181,186
+web/src/components/ChapterReviewPromiseCandidatesCard.test.tsx
+  s_25eee1fe0aa020::t_061cfa5fbd7572 1-27
+web/src/components/ChapterReviewPromiseCandidatesCard.tsx
+  s_25eee1fe0aa020::t_aff838fc1a28e4 1-84
+web/src/components/ChapterReviewWorldGateCard.test.tsx
+  s_25eee1fe0aa020::t_491d9f9b0d01ba 1-23
+web/src/components/ChapterReviewWorldGateCard.tsx
+  s_25eee1fe0aa020::t_af634a2a877526 1-70
+web/src/components/ChapterRevisionPipelineCard.test.tsx
+  s_25eee1fe0aa020::t_0075753db3dca9 1-44
+web/src/components/ChapterRevisionPipelineCard.tsx
+  s_25eee1fe0aa020::t_b95cf189ad2ab8 1-165
+web/src/components/CharacterCraftCard.test.tsx
+  s_25eee1fe0aa020::t_f3d2481df69967 1-56
+web/src/components/CharacterCraftCard.tsx
+  s_25eee1fe0aa020::t_7acb0e05770e85 1-458
+web/src/components/PromiseLedgerCard.test.tsx
+  s_25eee1fe0aa020::t_98837bd00f3e31 1-81
+web/src/components/PromiseLedgerCard.tsx
+  s_25eee1fe0aa020::t_4ebd09ce40a187 1-474
+web/src/components/README.md
+  s_25eee1fe0aa020::t_64ddb844194b49 1-29
+web/src/components/SectionPlanPanel.test.ts
+  s_25eee1fe0aa020::t_20e06196066417 26-35,41-43
+web/src/components/SectionPlanPanel.tsx
+  s_25eee1fe0aa020::t_b5f4323189d0d5 5-10,21-30,160-171
+web/src/components/SerializationPanel.test.tsx
+  s_25eee1fe0aa020::t_d361010d68f0a6 12-17
+web/src/components/StoryEngineCard.test.tsx
+  s_25eee1fe0aa020::t_1d9273112844dc 1-50
+web/src/components/StoryEngineCard.tsx
+  s_25eee1fe0aa020::t_3b3e7d42b38931 1-124
+web/src/components/StyleBibleDiagnosticsCard.test.tsx
+  s_25eee1fe0aa020::t_a25de0d88c231b 1-19
+web/src/components/StyleBibleDiagnosticsCard.tsx
+  s_25eee1fe0aa020::t_1bb995cb57895b 1-35
+web/src/components/WorldBibleDiagnosticsCard.test.tsx
+  s_25eee1fe0aa020::t_da37de05f37263 1-19
+web/src/components/WorldBibleDiagnosticsCard.tsx
+  s_25eee1fe0aa020::t_8131fcb696572a 1-38
+web/src/promise-ledger-api.test.ts
+  s_25eee1fe0aa020::t_98a940b3d3804f 1-67
+web/src/promise-ledger-api.ts
+  s_25eee1fe0aa020::t_dc413fedf6f228 1-41
+web/src/review-workflows.test.ts
+  s_25eee1fe0aa020::t_0718c3ed69f822 1-30
+web/src/story-engine-api.test.ts
+  s_25eee1fe0aa020::t_6327ad2c176f49 1-30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "26b43272c1551f9f1b6ea36dcca5f1799341f7f0",
+  "prompts": {},
+  "humans": {
+    "h_2ea779daa8153d": {
+      "author": "yanguifang <yanguifang@bytedance.com>"
+    }
+  },
+  "sessions": {
+    "s_25eee1fe0aa020": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fcfd6-a198-7c30-b328-c88e22e7f63e",
+        "model": "unknown"
+      },
+      "human_author": "yanguifang <yanguifang@bytedance.com>"
+    },
+    "s_aca8d3601d736b": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a696dc95dc2f7d7375ffdb3",
+        "model": "DeepSeek-V4-Flash__max"
+      },
+      "human_author": "yanguifang <yanguifang@bytedance.com>"
+    }
+  },
+  "attestation_metadata": {},
+  "remote_transcripts": {}
+}
