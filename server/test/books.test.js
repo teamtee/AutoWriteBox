@@ -7,6 +7,7 @@ import * as store from '../store.js';
 import { mountBookRoutes } from '../routes/books.js';
 import { createApp } from '../index.js';
 import { MAX_PREMISE_CHARS, MAX_VERSION_TEXT_CHARS } from '../limits.js';
+import { WORLD_BIBLE_SECTION_LABELS } from '../world-bible.js';
 import { startTestServer, stopTestServer } from './http-test-server.js';
 import { cleanupTestTempDirs, makeTestTempDir } from './test-temp-dir.js';
 
@@ -101,6 +102,11 @@ test('建书→加部→加章→读全树', async () => {
     assert.equal(tree.sections[0].chapters[0].body, undefined);
     assert.match(tree.book.outline.revision, /^[A-Za-z0-9_-]{43}$/);
     assert.match(tree.book.settings.core.world.revision, /^[A-Za-z0-9_-]{43}$/);
+    assert.deepEqual(tree.book.settings.worldBibleDiagnostics, {
+      valid: false, malformed: false, characters: 0, sectionCount: 0,
+      missingSections: [...WORLD_BIBLE_SECTION_LABELS],
+      thinSections: [], issues: ['too-short', 'missing-sections'],
+    });
     assert.match(tree.book.sectionPlanContextRevision, /^[A-Za-z0-9_-]{43}$/);
     assert.equal(tree.book.settings.serialization.dailyWordGoal, 2000);
     assert.match(tree.book.settings.serialization.revision, /^[A-Za-z0-9_-]{43}$/);
@@ -276,7 +282,7 @@ test('手工保存正文可显式重算摘要、人物与待确认记忆候选',
     assert.match(receivedPrompt, /回溯每天只能使用两次/);
 
     const reloaded = await store.readChapter(book.id, section.id, chapter.id);
-    assert.equal(reloaded.summary, '林越说明回溯限制');
+    assert.equal(reloaded.summary, '林越说明回溯限制'); assert.equal(reloaded.handoff.resourceState, '回溯当日仍可使用两次');
     assert.equal(reloaded.title, '人工章名');
     assert.equal(reloaded.memoryCandidates[0].id, result.memoryCandidates[0].id);
   }, async ({ messages }) => {
@@ -284,6 +290,7 @@ test('手工保存正文可显式重算摘要、人物与待确认记忆候选',
     return JSON.stringify({
       summary: '林越说明回溯限制', progress: '能力边界已明确',
       chapterTitle: '模型不应改名', sectionTitle: '模型不应改部名',
+      handoff: { viewpoint: '林越', time: '当日', location: '室内', ongoingAction: '说明能力限制', immediatePressure: '', characterState: '状态稳定', resourceState: '回溯当日仍可使用两次', knowledgeBoundary: '听者已知两次上限', unresolvedCausality: '' },
       characters: [],
       memoryCandidates: [{
         kind: 'ability', subject: '林越', predicate: '回溯上限', object: '每天两次',
@@ -311,9 +318,7 @@ test('记忆重算期间正文变化会丢弃迟到结果', async () => {
     );
     await started;
     await store.versionSet(book.id, path, '模型等待期间保存的新正文。');
-    finishModel(JSON.stringify({
-      summary: '旧摘要', progress: '旧进度', characters: [], memoryCandidates: [],
-    }));
+    finishModel(JSON.stringify({ summary: '旧摘要', progress: '旧进度', characters: [], memoryCandidates: [], handoff: { location: '旧地点' } }));
     const response = await request;
     assert.equal(response.status, 409);
     assert.deepEqual(await response.json(), { error: 'MEMORY_SOURCE_STALE' });
@@ -918,6 +923,24 @@ test('读取书树时章节损坏返回真实 JSON 错误，不误报书不存�
   });
 });
 
+test('读取书树时章节 JSON 根节点为 null 返回稳定存储错误', async () => {
+  await withServer(async () => {
+    const book = await j(await post('/api/books', { premise: 'p', title: '书' }));
+    const section = await j(await post(`/api/books/${book.id}/sections`, { title: '第一部' }));
+    const chapter = await j(await post(
+      `/api/books/${book.id}/sections/${section.id}/chapters`, { title: '第一章' },
+    ));
+    writeFileSync(
+      join(root, 'books', book.id, section.id, `${chapter.id}.json`), 'null', 'utf8',
+    );
+
+    const response = await fetch(`${base}/api/books/${book.id}/tree`);
+
+    assert.equal(response.status, 500);
+    assert.deepEqual(await j(response), { error: 'STORAGE_DATA_INVALID' });
+  });
+});
+
 test('读取书树时章节含非法 UTF-8 返回稳定存储错误', async () => {
   await withServer(async () => {
     const book = await j(await post('/api/books', { premise: 'p', title: '书' }));
@@ -1006,19 +1029,43 @@ const fakeWebFictionChecks = [
   'goldenChapter', 'premisePromise', 'chapterGoal', 'obstacleEscalation',
   'characterChoice', 'effectiveIncrement', 'payoff', 'endingHook',
   'expressionBalance', 'repetitionRisk', 'longArcProgress',
-].map((id) => ({ id, status: 'pass', detail: `${id} 有正文依据` }));
+].map((id) => ({ id, status: ['goldenChapter', 'premisePromise', 'chapterGoal', 'obstacleEscalation', 'characterChoice', 'sceneExecution', 'effectiveIncrement', 'payoff', 'tensionDynamics', 'longArcProgress'].includes(id) ? 'risk' : 'pass', detail: `${id} 有正文依据` }));
 
-const fakeReviewNonStream = async ({ messages }) => {
+let capturedReviewPrompt = '';
+let capturedReviewSystem = '';
+
+function fakePlanComparison(prompt) {
+  const matched = /目标标识：([^\n。]+)。/u.exec(prompt);
+  if (!matched) {
+    return { overall: 'na', summary: '本章没有已保存策划。', items: [], carryovers: [] };
+  }
+  const targets = matched[1].split('、').map((row) => row.split('=')[0]);
+  return {
+    overall: 'aligned', summary: '已保存策划均在正文中落地。',
+    items: targets.map((target) => ({
+      target, outcome: 'fulfilled', evidence: `${target} 在正文中有明确行动证据。`,
+    })),
+    carryovers: [],
+  };
+}
+
+const fakeReviewNonStream = async ({ messages, system }) => {
   const prompt = messages?.[0]?.content ?? '';
   if (prompt.includes('审阅第')) {
+    capturedReviewPrompt = prompt;
+    capturedReviewSystem = system ?? '';
     return JSON.stringify({
       score: 78,
       verdict: '冲突成立，中段推进偏松',
       webFictionSignals: {
-        chapterFunction: '冲突推进', conflictType: '人物争执', emotionTone: '紧张',
-        payoffType: '信息揭示', dominantMode: '对话',
+        chapterFunction: '冲突推进', conflictType: '人物争执', emotionTone: '紧张', payoffType: '信息揭示', dominantMode: '对话',
+        rhythmFingerprint: {
+          pressurePattern: 'choice-led', resolutionMethod: 'negotiation', payoffScale: 'chapter',
+          hookMechanism: 'none', costType: 'none',
+        },
       },
       webFictionChecks: fakeWebFictionChecks,
+      planComparison: fakePlanComparison(prompt),
       issues: [
         { title: '冲突弱', detail: '缺少导火索' },
         { title: '对话偏多', detail: '中段对话偏多，压缩后更紧凑' },
@@ -1047,12 +1094,29 @@ async function withReviewServer(fn, nonStreamChatFn) {
 
 test('手动审稿成功返回 review 并落盘', async () => {
   await withReviewServer(async () => {
+    capturedReviewPrompt = '';
+    capturedReviewSystem = '';
     const book = await j(await post('/api/books', { premise: 'p', title: '测试书' }));
     const s = await j(await post(`/api/books/${book.id}/sections`, { title: '第一部' }));
     const c = await j(await post(`/api/books/${book.id}/sections/${s.id}/chapters`, { title: '第一章' }));
     // 写入正文
     const path = `section:${s.id}:chapter:${c.id}`;
     await postVersion(book.id, 'save', { path, text: '第一章正文内容' });
+    const currentPlan = store.chapterPlanView(
+      (await store.readChapter(book.id, s.id, c.id)).plan,
+    );
+    await store.saveChapterPlan(book.id, s.id, c.id, {
+      goal: '迫使证人开口',
+      scenes: [{ action: '主角当面出示证据', turn: '证人承认撒谎' }],
+    }, { expectedRevision: currentPlan.revision });
+    const storedBook = await store.readBook(book.id);
+    await store.saveStoryEngine(book.id, {
+      readerExperience: '看主角用证据撬动封闭关系网',
+      protagonistAction: '调查并公开关键证据',
+      progression: '获得更接近幕后人的线索',
+      cost: '每次公开都会暴露一名盟友',
+      escalation: '从个人秘密升级到整座城市的利益链',
+    }, { expectedRevision: store.storyEngineView(storedBook.settings.storyEngine).revision });
 
     const r = await post(`/api/books/${book.id}/sections/${s.id}/chapters/${c.id}/review`);
     assert.equal(r.status, 200);
@@ -1064,10 +1128,19 @@ test('手动审稿成功返回 review 并落盘', async () => {
     assert.equal(body.webFictionChecks.length, 11);
     assert.equal(body.webFictionChecks[5].id, 'effectiveIncrement');
     assert.equal(body.webFictionSignals.conflictType, '人物争执');
+    assert.equal(body.planComparison.overall, 'aligned');
+    assert.deepEqual(body.planComparison.items.map((item) => item.target), [
+      'goal', 'scene-1',
+    ]);
     assert.ok(body.sourceCursor !== undefined);
     assert.equal(body.sourceFingerprint, (await store.readChapter(book.id, s.id, c.id)).bodyFingerprint);
     assert.match(body.sourceContextRevision, /^[A-Za-z0-9_-]{43}$/);
+    assert.match(body.sourcePlanRevision, /^[A-Za-z0-9_-]{43}$/);
     assert.ok(body.updatedAt);
+    assert.match(capturedReviewPrompt, /本章目标：迫使证人开口/);
+    assert.match(capturedReviewPrompt, /行动=主角当面出示证据/);
+    assert.match(capturedReviewSystem, /作品核心循环/);
+    assert.match(capturedReviewSystem, /看主角用证据撬动封闭关系网/);
 
     // 确认落盘
     const ch = await store.readChapter(book.id, s.id, c.id);
@@ -1075,6 +1148,44 @@ test('手动审稿成功返回 review 并落盘', async () => {
     assert.equal(ch.review.webFictionChecks[7].id, 'endingHook');
     assert.equal(ch.review.webFictionSignals.dominantMode, '对话');
     assert.equal(ch.review.sourceCursor, ch.body.cursor);
+  }, fakeReviewNonStream);
+});
+
+test('章节加载只报告上下文元数据，手动审稿实际携带上一有效章结尾', async () => {
+  await withReviewServer(async () => {
+    capturedReviewPrompt = '';
+    const book = await store.createBook({ premise: '跨章承接' });
+    const section = await store.addSection(book.id, {});
+    const previous = await store.addChapter(book.id, section.id, {});
+    const target = await store.addChapter(book.id, section.id, {});
+    const previousMarker = '门缝里的铜铃忽然响了三声';
+    await store.versionSet(
+      book.id, `section:${section.id}:chapter:${previous.id}`,
+      `上一章冲突与选择。${previousMarker}`,
+    );
+    await store.versionSet(
+      book.id, `section:${section.id}:chapter:${target.id}`, '当前待审正文',
+    );
+
+    const loadedResponse = await fetch(
+      `${base}/api/books/${book.id}/sections/${section.id}/chapters/${target.id}`,
+    );
+    assert.equal(loadedResponse.status, 200);
+    const loaded = await loadedResponse.json();
+    const items = loaded.contextManifest.layers.flatMap((layer) => layer.items);
+    assert.equal(items.find((item) => item.id === 'previous-ending').status, 'included');
+    assert.equal(items.find((item) => item.id === 'current-body').status, 'included');
+    assert.equal(JSON.stringify(loaded.contextManifest).includes(previousMarker), false);
+
+    const response = await rawPost(
+      `/api/books/${book.id}/sections/${section.id}/chapters/${target.id}/review`,
+      {
+        expectedBodyFingerprint: loaded.bodyFingerprint,
+        expectedContextRevision: loaded.reviewContextRevision,
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.match(capturedReviewPrompt, new RegExp(`【上一章结尾】[^\\n]*${previousMarker}`));
   }, fakeReviewNonStream);
 });
 

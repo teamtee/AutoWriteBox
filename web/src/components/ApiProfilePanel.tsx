@@ -57,6 +57,7 @@ export function ApiProfilePanel({
   const [note, setNote] = useState('');
   const [modelsText, setModelsText] = useState('');
   const [selectedModels, setSelectedModels] = useState<Record<string, string>>({});
+  const [modelContextDrafts, setModelContextDrafts] = useState<Record<string, number>>({});
   const [confirmActivateId, setConfirmActivateId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [discoveringId, setDiscoveringId] = useState<string | null>(null);
@@ -74,6 +75,11 @@ export function ApiProfilePanel({
       setLibrary(next);
       setSelectedModels(Object.fromEntries(
         next.profiles.map((profile) => [profile.id, profile.selectedModel]),
+      ));
+      setModelContextDrafts(Object.fromEntries(
+        next.profiles.flatMap((profile) => profile.models.map((model) => [
+          `${profile.id}\0${model}`, profile.modelContextChars?.[model] ?? 500000,
+        ])),
       ));
       setTaskRoutes(next.taskRoutes ?? EMPTY_TASK_ROUTES);
       return true;
@@ -104,6 +110,9 @@ export function ApiProfilePanel({
     try {
       await saveApiProfile({
         name, note, models, selectedModel: config.model, useCurrentConfig: true,
+        modelContextChars: Object.fromEntries(models.map((model) => [
+          model, model === config.model ? config.modelContextChars : 500000,
+        ])),
       }, library.revision, config.revision);
       setName(''); setNote(''); setModelsText('');
       await load();
@@ -192,6 +201,9 @@ export function ApiProfilePanel({
         baseUrl: profile.baseUrl,
         apiKey: profile.apiKey,
         models,
+        modelContextChars: Object.fromEntries(models.map((model) => [
+          model, profile.modelContextChars?.[model] ?? 500000,
+        ])),
         selectedModel,
       }, library.revision);
       await load();
@@ -205,6 +217,33 @@ export function ApiProfilePanel({
       setDiscoveringId(null);
       setBusy(false);
     }
+  };
+
+  const saveModelContext = async (profileId: string) => {
+    if (!library || busy) return;
+    const profile = library.profiles.find((item) => item.id === profileId);
+    if (!profile) return;
+    const selectedModel = selectedModels[profileId] ?? profile.selectedModel;
+    const key = `${profileId}\0${selectedModel}`;
+    const chars = modelContextDrafts[key] ?? profile.modelContextChars?.[selectedModel] ?? 500000;
+    setBusy(true); setError(null);
+    try {
+      const nextContexts = Object.fromEntries(profile.models.map((model) => [
+        model,
+        model === selectedModel ? chars : profile.modelContextChars?.[model] ?? 500000,
+      ]));
+      await saveApiProfile({
+        id: profile.id, name: profile.name, note: profile.note,
+        baseUrl: profile.baseUrl, apiKey: profile.apiKey,
+        models: profile.models, modelContextChars: nextContexts, selectedModel,
+      }, library.revision);
+      await load();
+      toast.success(`✓ 已保存 ${selectedModel} 的上下文窗口`);
+    } catch (reason) {
+      if (isApiErrorCode(reason, 'API_PROFILES_CONFLICT')
+        || isAmbiguousApiFailure(reason)) await load();
+      setError(messageOf(reason));
+    } finally { setBusy(false); }
   };
 
   const saveRouting = async () => {
@@ -240,7 +279,20 @@ export function ApiProfilePanel({
           onChange={(event) => setSelectedModels((current) => ({ ...current, [profile.id]: event.target.value }))}>
           {profile.models.map((model) => <option key={model} value={model}>{model}</option>)}
         </select></label>
-        <footer><button type="button" className="hbtn accent-2" disabled={disabled || busy}
+        <label>所选模型上下文窗口（字符）<input type="number" min="16000" max="2000000" step="1000"
+          disabled={disabled || busy}
+          value={modelContextDrafts[`${profile.id}\0${selectedModels[profile.id] ?? profile.selectedModel}`]
+            ?? profile.modelContextChars?.[selectedModels[profile.id] ?? profile.selectedModel] ?? 500000}
+          onChange={(event) => {
+            const model = selectedModels[profile.id] ?? profile.selectedModel;
+            setModelContextDrafts((current) => ({
+              ...current, [`${profile.id}\0${model}`]: Number(event.target.value),
+            }));
+          }} />
+        </label>
+        <footer><button type="button" className="hbtn" disabled={disabled || busy}
+          onClick={() => { void saveModelContext(profile.id); }}>保存窗口</button>
+        <button type="button" className="hbtn accent-2" disabled={disabled || busy}
           onClick={() => { void activate(profile.id); }}>
           {confirmActivateId === profile.id ? '确认丢弃草稿并切换？' : '应用此方案'}
         </button><button type="button" className="hbtn" disabled={disabled || busy}

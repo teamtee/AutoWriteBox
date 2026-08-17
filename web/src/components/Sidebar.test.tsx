@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { BookTree } from '../types';
-import { Sidebar } from './Sidebar';
+import { firstReviewDueSelection, Sidebar } from './Sidebar';
 
 const tree: BookTree = {
   book: {
@@ -10,6 +10,10 @@ const tree: BookTree = {
     titleSource: 'manual',
     outline: { versions: [''], cursor: 0 },
     settings: {
+      storyEngine: {
+        readerExperience: '', protagonistAction: '', progression: '', cost: '', escalation: '',
+        revision: 'E'.repeat(43), isEmpty: true,
+      },
       core: {
         world: { versions: [''], cursor: 0 },
         style: { versions: [''], cursor: 0 },
@@ -45,6 +49,28 @@ describe('Sidebar keyboard navigation semantics', () => {
     expect(html).toContain('<button type="button" class="side-tab  ">🧭 核心设定</button>');
     expect(html).toContain('<button type="button" class="side-tab  ">📅 连载管理</button>');
     expect(html).toMatch(/<button type="button" class="nav-item\s+\s+chapter"[^>]*><span>第一章 · 开场<\/span>/);
+    expect(html).toContain('class="sidebar-review-debt" title="跳到全书顺序中的第一个待审章节">待审 1 章 · 去处理</button>');
+    expect(html).toContain('class="review-due" title="正文尚无当前有效审稿">待审</span>');
+  });
+
+  it('selects the first review-due chapter without starting review', () => {
+    expect(firstReviewDueSelection(tree)).toEqual({
+      kind: 'chapter', sectionId: 'section-01', chapterId: 'chapter-01',
+    });
+    const reviewed: BookTree = structuredClone(tree);
+    reviewed.sections[0].chapters[0].reviewCurrent = true;
+    expect(firstReviewDueSelection(reviewed)).toBeNull();
+  });
+
+  it('marks chapters with current review as completed instead of due', () => {
+    const reviewed: BookTree = structuredClone(tree);
+    reviewed.sections[0].chapters[0].reviewCurrent = true;
+    const html = renderToStaticMarkup(
+      <Sidebar tree={reviewed} selection={{ kind: 'outline' }} disabled={false} {...callbacks} />,
+    );
+    expect(html).toContain('class="done" title="正文已有当前有效审稿">✓</span>');
+    expect(html).not.toContain('sidebar-review-debt');
+    expect(html).not.toContain('class="review-due"');
   });
 
   it('uses native disabled state for every navigation target while locked', () => {

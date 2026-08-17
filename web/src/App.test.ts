@@ -27,6 +27,7 @@ import {
   runExclusiveStructureMutation,
   runExclusiveVersionMutation,
   runExclusiveSectionAdoption,
+  runPersistedCreation,
   runShelfMutation,
   verifiedShelfRefresh,
   shouldDisableSidebar,
@@ -38,6 +39,7 @@ import {
 
 describe('page exit protection', () => {
   const idle = {
+    hasEditorDraft: false,
     creationPremiseDraft: false,
     whipDraft: false,
     sectionPlanDraft: false,
@@ -98,6 +100,10 @@ const treeWithChapter = (bookId: string): BookTree => ({
     titleSource: 'manual',
     outline: { versions: [''], cursor: 0 },
     settings: {
+      storyEngine: {
+        readerExperience: '', protagonistAction: '', progression: '', cost: '', escalation: '',
+        revision: 'E'.repeat(43), isEmpty: true,
+      },
       core: {
         world: { versions: [''], cursor: 0 },
         style: { versions: [''], cursor: 0 },
@@ -124,6 +130,20 @@ const chapter = (id = 'chapter-01'): Chapter => ({
   body: { versions: [''], cursor: 0 },
   content: '',
   bodyFingerprint: '',
+  plan: {
+    qualityProtocolVersion: 3,
+    designProtocolVersion: 1,
+    rhythmIntentVersion: 1,
+    rhythmIntent: {
+      pressurePattern: 'choice-led', resolutionMethod: 'wit', payoffScale: 'chapter',
+      hookMechanism: 'new-information', costType: 'identity',
+    },
+    goal: '', obstacle: '', choice: '', payoff: '', hook: '',
+    tensionArc: '', foreshadowing: '', worldExpansion: '',
+    decisionChain: '', knowledgeDesign: '', notes: '',
+    scenes: [],
+    revision: 'P'.repeat(43), isEmpty: true,
+  },
   characters: [],
   summary: '',
   progress: '',
@@ -755,6 +775,63 @@ describe('persisted mutation failure reconciliation', () => {
   });
 });
 
+describe('persisted creation workflow', () => {
+  it('returns the created value after refreshing the committed target', async () => {
+    const created = { id: 'chapter-02' };
+    const refreshAfterFailure = vi.fn(async () => undefined);
+    const refreshAfterSuccess = vi.fn(async () => undefined);
+
+    await expect(runPersistedCreation({
+      create: async () => created,
+      refreshAfterFailure,
+      refreshAfterSuccess,
+    })).resolves.toEqual({ status: 'created', value: created, refreshError: null });
+    expect(refreshAfterFailure).not.toHaveBeenCalled();
+    expect(refreshAfterSuccess).toHaveBeenCalledWith(created);
+  });
+
+  it('keeps creation success distinct when the committed-target refresh fails', async () => {
+    const created = { id: 'section-02' };
+    const refreshError = new Error('reload failed');
+
+    const result = await runPersistedCreation({
+      create: async () => created,
+      refreshAfterFailure: async () => undefined,
+      refreshAfterSuccess: async () => { throw refreshError; },
+    });
+
+    expect(result).toEqual({ status: 'created', value: created, refreshError });
+  });
+
+  it('reconciles an ambiguous creation failure without running the success refresh', async () => {
+    const error = new TypeError('fetch failed');
+    const refreshAfterFailure = vi.fn(async () => undefined);
+    const refreshAfterSuccess = vi.fn(async () => undefined);
+
+    await expect(runPersistedCreation({
+      create: async () => { throw error; },
+      refreshAfterFailure,
+      refreshAfterSuccess,
+    })).resolves.toEqual({ status: 'failed', error, reconciliation: 'refreshed' });
+    expect(refreshAfterFailure).toHaveBeenCalledOnce();
+    expect(refreshAfterSuccess).not.toHaveBeenCalled();
+  });
+
+  it('does not refresh an explicitly rejected creation', async () => {
+    const error = new ApiResponseError('SECTION_LIMIT', 400);
+    const refreshAfterFailure = vi.fn(async () => undefined);
+
+    await expect(runPersistedCreation({
+      create: async () => { throw error; },
+      refreshAfterFailure,
+      refreshAfterSuccess: async () => undefined,
+    })).resolves.toEqual({
+      status: 'failed', error, reconciliation: 'explicit_failure',
+    });
+    expect(refreshAfterFailure).not.toHaveBeenCalled();
+  });
+});
+
 describe('generation failure reconciliation', () => {
   it('refreshes the fallback selection before reporting a failure without a saved acknowledgement', async () => {
     const selection = { kind: 'chapter', sectionId: 'section-01', chapterId: 'chapter-01' } as const;
@@ -854,12 +931,13 @@ describe('generation completion ownership', () => {
 
   it('turns each postprocess degradation into an actionable partial-success message', () => {
     expect(chapterPostprocessWarningMessage(undefined)).toBeNull();
-    expect(chapterPostprocessWarningMessage(['digest'])).toMatch(/摘要\/剧情路标\/人物提取未完成/);
+    expect(chapterPostprocessWarningMessage(['digest']))
+      .toMatch(/摘要\/剧情路标\/人物与章末交接快照提取未完成/);
     expect(chapterPostprocessWarningMessage(['digest'])).toMatch(/下一章/);
     expect(chapterPostprocessWarningMessage(['review'])).toMatch(/自动审稿未完成/);
     expect(chapterPostprocessWarningMessage(['review'])).toMatch(/手动重试/);
     expect(chapterPostprocessWarningMessage(['digest', 'review']))
-      .toMatch(/摘要\/剧情路标\/人物提取和自动审稿均未完成/);
+      .toMatch(/摘要\/剧情路标\/人物与章末交接快照提取和自动审稿均未完成/);
   });
 
   it('requires both the current token and a still-running action', () => {

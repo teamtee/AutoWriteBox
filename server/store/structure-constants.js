@@ -1,0 +1,9 @@
+export const IMPORT_STAGE_FORMAT = 'auto-novel-box-import-staging';
+export const IMPORT_STAGE_OWNER_FILE = '.import-owner.json';
+export const STRUCTURE_TRANSACTION_FORMAT = 'auto-novel-box-structure-transaction';
+export const STRUCTURE_TRANSACTION_VERSION = 1;
+export const BOOK_STRUCTURE_TRANSACTION_FILE = '.book-structure-transaction.json';
+export const SECTION_STRUCTURE_TRANSACTION_FILE = '.section-structure-transaction.json';
+export const CHAPTER_DIGEST_TRANSACTION_FORMAT = 'auto-novel-box-chapter-digest-transaction';
+export const CHAPTER_DIGEST_TRANSACTION_VERSION = 1;
+export const CHAPTER_DIGEST_TRANSACTION_FILE = '.chapter-digest-transaction.json';

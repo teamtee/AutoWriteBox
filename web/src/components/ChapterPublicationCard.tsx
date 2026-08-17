@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as api from '../api';
 import type { Chapter, ChapterPublicationPreflight } from '../types';
+import { createLatestAbortGate } from '../asyncAction';
 
 const preflightStatusLabels = {
   pass: '通过', risk: '风险', pending: '待检查', manual: '人工确认',
@@ -20,14 +21,18 @@ export function ChapterPublicationCard({
   const [preflighting, setPreflighting] = useState(false);
   const [preflight, setPreflight] = useState<ChapterPublicationPreflight | null>(null);
   const [preflightError, setPreflightError] = useState('');
+  const preflightGate = useRef(createLatestAbortGate()).current;
   const published = chapter.published;
   const isCurrent = Boolean(published?.isCurrent);
 
   useEffect(() => {
+    preflightGate.invalidate();
     setConfirming(false);
+    setPreflighting(false);
     setPreflight(null);
     setPreflightError('');
-  }, [chapter.id, chapter.bodyFingerprint]);
+    return () => preflightGate.invalidate();
+  }, [bookId, sectionId, chapter.id, chapter.bodyFingerprint]);
 
   const requestPublish = () => {
     if (!confirming) {
@@ -40,18 +45,21 @@ export function ChapterPublicationCard({
 
   const runPreflight = async () => {
     if (preflighting || disabled || !chapter.content.trim()) return;
+    const { token, signal } = preflightGate.begin();
     setPreflighting(true);
     setPreflightError('');
     try {
       const result = await api.getChapterPublicationPreflight(
-        bookId, sectionId, chapter.id, chapter.bodyFingerprint,
+        bookId, sectionId, chapter.id, chapter.bodyFingerprint, signal,
       );
+      if (!preflightGate.owns(token)) return;
       setPreflight(result);
     } catch (error) {
+      if (!preflightGate.owns(token) || signal.aborted) return;
       setPreflight(null);
       setPreflightError(api.readableApiError(error instanceof Error ? error.message : error));
     } finally {
-      setPreflighting(false);
+      if (preflightGate.owns(token)) setPreflighting(false);
     }
   };
 

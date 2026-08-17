@@ -54,6 +54,7 @@ export async function saveSettingsConfig({
 
 const CONFIG_DRAFT_FIELDS: Array<keyof Config> = [
   'baseUrl', 'model', 'apiKey', 'chapterWordTarget', 'requestTimeoutMs',
+  'modelContextChars',
 ];
 
 export function hasSettingsDraft(config: Config, loaded: Config | null): boolean {
@@ -67,8 +68,8 @@ export function shouldConfirmSettingsDiscard(dirty: boolean, confirmed: boolean)
 
 export function SettingsPage({ onClose }: { onClose: () => void }) {
   const [cfg, setCfg] = useState<Config>({
-    baseUrl: '', model: '', apiKey: '', chapterWordTarget: 2000,
-    requestTimeoutMs: 300000, revision: '',
+    baseUrl: '', model: '', apiKey: '', chapterWordTarget: 3000,
+    requestTimeoutMs: 300000, modelContextChars: 500000, revision: '',
   });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -111,7 +112,8 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
   const dirty = hasSettingsDraft(cfg, loadedCfg);
   useBeforeUnloadWarning(dirty || saving);
   const set = (k: keyof Config) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = k === 'chapterWordTarget' || k === 'requestTimeoutMs' ? Number(e.target.value) : e.target.value;
+    const value = k === 'chapterWordTarget' || k === 'requestTimeoutMs'
+      || k === 'modelContextChars' ? Number(e.target.value) : e.target.value;
     setConfirmClose(false);
     setConfirmReload(false);
     setDiscoveredModels([]);
@@ -123,6 +125,7 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
       }
       if (k === 'chapterWordTarget') return { ...current, chapterWordTarget: Number(value) };
       if (k === 'requestTimeoutMs') return { ...current, requestTimeoutMs: Number(value) };
+      if (k === 'modelContextChars') return { ...current, modelContextChars: Number(value) };
       return { ...current, [k]: String(value) };
     });
   };
@@ -233,8 +236,12 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
           <datalist id="discovered-api-models">{discoveredModels.map((model) => <option key={model} value={model} />)}</datalist>
           <label>API Key<input name="apiKey" type="password" autoComplete="off" maxLength={8192} disabled={formDisabled} value={cfg.apiKey} onChange={set('apiKey')} placeholder="sk-..." spellCheck={false} autoCapitalize="none" /></label>
           <div className="form-hint">生成前必须填写 Base URL 和模型名；带 API Key 的远程服务必须使用 HTTPS，本地免密服务可不填 Key。</div>
-          <label>每章目标字数<input name="chapterWordTarget" type="number" min="1" max="50000" step="1" disabled={formDisabled} value={cfg.chapterWordTarget} onChange={set('chapterWordTarget')} /></label>
+          <label>每章目标字数<input name="chapterWordTarget" type="number" min="3000" max="50000" step="1" disabled={formDisabled} value={cfg.chapterWordTarget} onChange={set('chapterWordTarget')} /></label>
+          <div className="form-hint">最低 3000 字。订阅分成按千字计算，短章几乎都是关键场景被压成概述的结果；它是体量下限，不是生成上限。</div>
           <label>API 超时（毫秒）<input name="requestTimeoutMs" type="number" min="1000" max="3600000" step="1" disabled={formDisabled} value={cfg.requestTimeoutMs} onChange={set('requestTimeoutMs')} /></label>
+          <label>模型上下文窗口（字符）<input name="modelContextChars" type="number" min="16000" max="2000000" step="1000" disabled={formDisabled} value={cfg.modelContextChars} onChange={set('modelContextChars')} />
+            <small>不知道时保留 500000；32k 窗口模型可填 32000。服务端仍以 500000 作为本地输入硬上限。</small>
+          </label>
           <div className="btn-row">
             <button type="button" className="hbtn" disabled={formDisabled || dirty || !loadedCfg?.baseUrl || !loadedCfg.model}
               onClick={() => { void discoverModels(); }}>{discovering ? '检查中…' : '检查连接 / 发现模型'}</button>

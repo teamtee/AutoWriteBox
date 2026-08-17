@@ -2,6 +2,14 @@ import type { BookTree } from '../types';
 import type { Selection } from '../store';
 import { formatIndexedTitle } from '../titles';
 
+export function firstReviewDueSelection(tree: BookTree): Selection | null {
+  for (const section of tree.sections) {
+    const chapter = section.chapters.find((row) => row.hasContent && !row.reviewCurrent);
+    if (chapter) return { kind: 'chapter', sectionId: section.id, chapterId: chapter.id };
+  }
+  return null;
+}
+
 export function Sidebar({ tree, selection, disabled, onSelect, onAddSection, onAddChapter, onPlanSections }: {
   tree: BookTree; selection: Selection; disabled: boolean;
   onSelect: (s: Selection) => void;
@@ -12,8 +20,16 @@ export function Sidebar({ tree, selection, disabled, onSelect, onAddSection, onA
   const active = (s: Selection) => JSON.stringify(s) === JSON.stringify(selection) ? 'active' : '';
   const go = (s: Selection) => { if (!disabled) onSelect(s); };
   const cls = (s: Selection) => `nav-item ${active(s)} ${disabled ? 'disabled' : ''}`;
+  const reviewDueCount = tree.sections.reduce((count, section) => count
+    + section.chapters.filter((chapter) => chapter.hasContent && !chapter.reviewCurrent).length, 0);
+  const firstReviewDue = firstReviewDueSelection(tree);
   return (
     <aside className={`sidebar sketch ${disabled ? 'locked' : ''}`}>
+      {reviewDueCount > 0 && <button type="button" className="sidebar-review-debt"
+        disabled={disabled} title="跳到全书顺序中的第一个待审章节"
+        onClick={() => firstReviewDue && go(firstReviewDue)}>
+        待审 {reviewDueCount} 章 · 去处理
+      </button>}
       <div className="side-tabs">
         <button type="button"
           className={`side-tab ${active({ kind: 'outline' })} ${disabled ? 'disabled' : ''}`}
@@ -43,7 +59,12 @@ export function Sidebar({ tree, selection, disabled, onSelect, onAddSection, onA
                   && selection.sectionId === s.id && selection.chapterId === c.id
                   ? 'page' : undefined}
                 onClick={() => go({ kind: 'chapter', sectionId: s.id, chapterId: c.id })}>
-                <span>{formatIndexedTitle(c.index, '章', c.title)}</span>{c.hasContent ? <span className="done">✓</span> : null}
+                <span>{formatIndexedTitle(c.index, '章', c.title)}</span>
+                {c.hasContent && c.reviewCurrent
+                  ? <span className="done" title="正文已有当前有效审稿">✓</span>
+                  : c.hasContent
+                    ? <span className="review-due" title="正文尚无当前有效审稿">待审</span>
+                    : null}
               </button>
             ))}
           </div>

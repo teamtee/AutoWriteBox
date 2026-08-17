@@ -7,6 +7,19 @@ const chapter = (published?: Chapter['published']): Chapter => ({
   id: 'chapter-1', index: 1, title: '第一章', titleSource: 'manual',
   body: { versions: ['当前正文'], cursor: 0, revision: 'R'.repeat(43) },
   content: '当前正文', bodyFingerprint: 'C'.repeat(43),
+  plan: {
+    qualityProtocolVersion: 2,
+    designProtocolVersion: 0,
+    rhythmIntentVersion: 0,
+    rhythmIntent: {
+      pressurePattern: '', resolutionMethod: '', payoffScale: '', hookMechanism: '', costType: '',
+    },
+    goal: '', obstacle: '', choice: '', payoff: '', hook: '',
+    tensionArc: '', foreshadowing: '', worldExpansion: '',
+    decisionChain: '', knowledgeDesign: '', notes: '',
+    scenes: [],
+    revision: 'P'.repeat(43), isEmpty: true,
+  },
   characters: [], summary: '', progress: '', status: 'done', published,
 });
 

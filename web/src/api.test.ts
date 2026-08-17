@@ -3,11 +3,11 @@ import {
   activateApiProfile, addChapter, addSection, ApiResponseError, createBook, createClientBookId, createWritingAssetReference, deactivateMemoryFact, decideMemoryCandidate, deleteApiProfile, deleteBook, deletePlatformConfirmation,
   deleteWritingAsset, discoverApiModels, downloadBookBackup, downloadBookManuscript, extractBookNativeWritingAsset, extractWritingAsset, getChapter, getChapterPublicationPreflight, getConfig, getStorageDiagnostics, getWritingAssets,
   getApiProfiles, getBookMemory, importBookBackup, isAmbiguousApiFailure, isApiErrorCode, listBooks, listDeletedBooks,
-  parseSSELines,
   readableApiError, recomputeChapterMemory, renameBook, reviewChapter, saveApiBookBinding,
   saveApiProfile, saveApiTaskRoutes,
   saveConfig, savePlatformConfirmation, saveSerializationSettings, saveWritingAssetBookBinding, streamGen, versionSave,
 } from './api';
+import { parseSSELines } from './api-sse';
 
 const realFetch = globalThis.fetch;
 
@@ -91,6 +91,31 @@ describe('writing asset API', () => {
     expect(globalThis.fetch).toHaveBeenNthCalledWith(6, `/api/writing-assets/asset_${'a'.repeat(32)}`, expect.objectContaining({
       method: 'DELETE', body: JSON.stringify({ expectedRevision: 'N'.repeat(43) }),
     }));
+  });
+
+  it('forwards cancellation through chapter-scoped asset mutations', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+      revision: 'R'.repeat(43), asset: { id: 'asset_1' }, binding: {},
+    }), { headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+    const controller = new AbortController();
+    const binding = {
+      nativeAssetId: null, primaryAssetId: null,
+      auxiliaryAssetIds: [], sceneAssetIds: {}, chapterScenes: {},
+    };
+
+    await extractBookNativeWritingAsset(
+      'book_test', 'section_test', 'chapter_test', '本书原生', controller.signal,
+    );
+    await saveWritingAssetBookBinding(
+      'book_test', binding, 'L'.repeat(43), controller.signal,
+    );
+
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(1,
+      '/api/writing-assets/books/book_test/sections/section_test/chapters/chapter_test/native',
+      expect.objectContaining({ signal: controller.signal }));
+    expect(globalThis.fetch).toHaveBeenNthCalledWith(2,
+      '/api/writing-assets/books/book_test',
+      expect.objectContaining({ signal: controller.signal }));
   });
 
   it('maps asset extraction failures to actionable text', () => {
@@ -180,13 +205,15 @@ describe('publication preflight API', () => {
       headers: { 'Content-Type': 'application/json' },
     })) as unknown as typeof fetch;
 
+    const controller = new AbortController();
     await expect(getChapterPublicationPreflight(
-      'book one', 'section one', 'chapter one', 'F'.repeat(43),
+      'book one', 'section one', 'chapter one', 'F'.repeat(43), controller.signal,
     )).resolves.toEqual(response);
     expect(globalThis.fetch).toHaveBeenCalledWith(
       '/api/books/book%20one/sections/section%20one/chapters/chapter%20one/publication/preflight',
       expect.objectContaining({
         method: 'POST', body: JSON.stringify({ expectedBodyFingerprint: 'F'.repeat(43) }),
+        signal: controller.signal,
       }),
     );
   });
@@ -386,10 +413,22 @@ describe('parseSSELines', () => {
       title: '起源', summary: '开端', promise: '能力谜团', goal: '活下去',
       obstacle: '追杀', progress: '发现组织', climax: '车站突围',
       payoff: '首次反杀', stateChange: '身份暴露',
+      worldProgression: {
+        layer: '当前生活圈', stagePromise: '看见城内生存规则', evidence: '通行牌当场失效',
+        characterAction: '主角主动查验通行牌', choiceAndCost: '保住同伴并失去身份',
+        knowledgeGain: '确认追杀是制度行为', protectedUnknown: '不揭示幕后势力',
+        gateOutcome: 'open-next', gateCondition: '拿到跨区证据', gateProgress: '车站突围后拿到外区印章',
+      },
     }, {
       title: '终局', summary: '决战', promise: '清算真凶', goal: '终结组织',
       obstacle: '盟友背叛', progress: '进入核心区', climax: '总部决战',
       payoff: '真相公开', stateChange: '旧秩序瓦解',
+      worldProgression: {
+        layer: '长线文明与历史', stagePromise: '看见旧秩序的历史来源', evidence: '总部档案可被交叉核验',
+        characterAction: '主角主动公开档案', choiceAndCost: '公开真相并失去原有特权',
+        knowledgeGain: '确认文明历史被人为改写', protectedUnknown: '保留新秩序的未来答案',
+        gateOutcome: 'complete-long', gateCondition: '向公众证明历史造假', gateProgress: '总部决战后当众完成证明',
+      },
     }];
     const payload = JSON.stringify({
       done: true, sections: '规划结果', parsedTitles: ['起源', '终局'], parsedSections,
@@ -403,6 +442,10 @@ describe('parseSSELines', () => {
     expect(() => parseSSELines(`data: ${JSON.stringify({
       done: true, sections: '规划', parsedTitles: ['起源', '终局'],
       parsedSections: parsedSections.map(({ payoff: _payoff, ...item }) => item),
+    })}\n\n`, '')).toThrow('生成中断：响应格式无效');
+    expect(() => parseSSELines(`data: ${JSON.stringify({
+      done: true, sections: '规划', parsedTitles: ['起源', '终局'],
+      parsedSections: parsedSections.map(({ worldProgression: _world, ...item }) => item),
     })}\n\n`, '')).toThrow('生成中断：响应格式无效');
   });
   it('按服务端合同限制终止帧 ID、错误码和规划列表', () => {
@@ -965,13 +1008,15 @@ describe('config API', () => {
       capturedBody = String(init?.body ?? '');
       return new Response(JSON.stringify({
         baseUrl: 'https://example.test/v1', model: 'model-new', apiKey: 'sk-****',
-        chapterWordTarget: 2400, requestTimeoutMs: 180000, revision: 'N'.repeat(43),
+        chapterWordTarget: 2400, requestTimeoutMs: 180000,
+        modelContextChars: 32000, revision: 'N'.repeat(43),
       }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }) as unknown as typeof fetch;
 
     const saved = await saveConfig({
       baseUrl: 'https://example.test/v1', model: 'model-new', apiKey: 'sk-****',
-      chapterWordTarget: 2400, requestTimeoutMs: 180000, revision,
+      chapterWordTarget: 2400, requestTimeoutMs: 180000,
+      modelContextChars: 32000, revision,
     });
 
     expect(saved.revision).toBe('N'.repeat(43));
@@ -981,6 +1026,7 @@ describe('config API', () => {
       apiKey: 'sk-****',
       chapterWordTarget: 2400,
       requestTimeoutMs: 180000,
+      modelContextChars: 32000,
       expectedRevision: revision,
     });
   });
@@ -1302,7 +1348,7 @@ describe('readableApiError', () => {
     expect(readableApiError('PREMISE_TOO_LARGE')).toContain('2 万');
     expect(readableApiError('TEXT_TOO_LARGE')).toContain('20 万');
     expect(readableApiError('BAD_CHAPTER_WORD_TARGET')).toContain('50000');
-    expect(readableApiError('LLM_INPUT_TOO_LARGE')).toContain('精简');
+    expect(readableApiError('LLM_INPUT_TOO_LARGE')).toContain('分层预算');
     expect(readableApiError('LLM_BUSY')).toContain('等待');
     expect(readableApiError('STORAGE_FULL')).toContain('磁盘空间');
     expect(readableApiError('STORAGE_PERMISSION_DENIED')).toContain('目录不可写');
@@ -1322,6 +1368,7 @@ describe('readableApiError', () => {
     expect(readableApiError('NEXT_SECTION_CONFLICT')).toContain('另一页面');
     expect(readableApiError('NEXT_CHAPTER_CONFLICT')).toContain('另一页面');
     expect(readableApiError('GENERATION_CONTEXT_CONFLICT')).toContain('旧上下文结果未保存');
+    expect(readableApiError('SECTION_PLAN_WORLD_BIBLE_REQUIRED')).toContain('三层世界圣经');
     expect(readableApiError('STRUCTURE_TRANSACTION_RECOVERED')).toContain('本次操作未执行');
     expect(readableApiError('REVIEW_CONTEXT_STALE')).toContain('重新审稿');
     expect(readableApiError('CONFIG_CONFLICT')).toContain('另一页面');
@@ -1340,8 +1387,12 @@ describe('readableApiError', () => {
       'BAD_REQUEST_TIMEOUT',
       'BAD_WHIP',
       'BAD_PATH',
+      'BAD_SECTION_OUTLINE',
       'BAD_ID',
+      'NOT_FOUND',
       'BAD_CONFIG_PATCH',
+      'HOST_NOT_ALLOWED',
+      'ORIGIN_NOT_ALLOWED',
     ];
     for (const code of codes) expect(readableApiError(code)).not.toBe(code);
     expect(readableApiError('REVIEW_FAILED')).toContain('审稿结果格式不完整');

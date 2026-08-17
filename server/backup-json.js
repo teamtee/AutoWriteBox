@@ -287,6 +287,7 @@ function createTopLevelProjectionParser(specification) {
   const values = {};
   const versionedTextStates = new Map();
   const publishedChapterStates = new Map();
+  const currentReviewStates = new Map();
   let activeObjectKeys = 0;
 
   const current = () => stack[stack.length - 1];
@@ -358,6 +359,17 @@ function createTopLevelProjectionParser(specification) {
           capture: null,
         };
       }
+      if (field.type === 'currentReviewSummary') {
+        if (valueType !== 'object') invalidBackup();
+        currentReviewStates.set(location.key, {});
+        return {
+          context: {
+            kind: 'currentReview', key: location.key,
+            fingerprintMaxBytes: field.fingerprintMaxBytes,
+          },
+          capture: null,
+        };
+      }
       if (field.type === 'publishedChapterSummary') {
         if (valueType !== 'object') invalidBackup();
         publishedChapterStates.set(location.key, {});
@@ -405,6 +417,18 @@ function createTopLevelProjectionParser(specification) {
         return {
           context: { kind: 'generic' },
           capture: { kind: 'versionedCursor', key: parent.context.key },
+        };
+      }
+    }
+    if (parent.context.kind === 'currentReview') {
+      if (location.key === 'sourceFingerprint') {
+        if (valueType !== 'string') invalidBackup();
+        return {
+          context: { kind: 'generic' },
+          capture: {
+            kind: 'reviewFingerprint', key: parent.context.key,
+            maxBytes: parent.context.fingerprintMaxBytes,
+          },
         };
       }
     }
@@ -496,6 +520,8 @@ function createTopLevelProjectionParser(specification) {
       publishedChapterStates.get(capture.key).publishedAt = value;
     } else if (capture.kind === 'publicationNumber') {
       publishedChapterStates.get(capture.key).publicationNumber = value;
+    } else if (capture.kind === 'reviewFingerprint') {
+      currentReviewStates.get(capture.key).sourceFingerprint = value;
     }
   }
 
@@ -544,6 +570,11 @@ function createTopLevelProjectionParser(specification) {
           || state.cursor < 0
           || state.cursor >= state.items.length) invalidBackup();
         values[frame.context.key] = state.items[state.cursor];
+      } else if (frame.context.kind === 'currentReview') {
+        const state = currentReviewStates.get(frame.context.key);
+        if (typeof state?.sourceFingerprint !== 'string'
+          || !/^[A-Za-z0-9_-]{43}$/.test(state.sourceFingerprint)) invalidBackup();
+        values[frame.context.key] = { sourceFingerprint: state.sourceFingerprint };
       } else if (frame.context.kind === 'publishedChapter') {
         const state = publishedChapterStates.get(frame.context.key);
         if (!state?.content

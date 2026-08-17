@@ -253,6 +253,31 @@ test('优雅关闭超时后强制断开并把强制状态传给清理', async ()
   lifecycle.dispose();
 });
 
+test('关闭期限自身保持事件循环并在强制断连后完成清理', async () => {
+  const processRef = new EventEmitter();
+  const server = new FakeServer();
+  const logger = createLogger();
+  let cleaned = false;
+  server.closeAllConnections = function closeAllConnections() {
+    this.forceCalls += 1;
+    queueMicrotask(() => this.finish());
+  };
+  const lifecycle = attachServerLifecycle(server, {
+    processRef,
+    shutdownTimeoutMs: 5,
+    cleanup: async () => { cleaned = true; },
+    logger,
+  });
+
+  lifecycle.shutdown('TEST');
+  await lifecycle.closed;
+
+  assert.equal(server.forceCalls, 1);
+  assert.equal(cleaned, true);
+  assert.equal(processRef.exitCode, 1);
+  lifecycle.dispose();
+});
+
 test('服务关闭自身失败时按强制状态清理，避免提前释放数据租约', async () => {
   const processRef = new EventEmitter();
   const server = new FakeServer();

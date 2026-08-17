@@ -1,6 +1,7 @@
 import {
   MAX_API_BOOK_BINDINGS, MAX_API_PROFILES, MAX_API_PROFILE_MODELS, MAX_API_PROFILE_NAME_CHARS,
-  MAX_API_PROFILE_NOTE_CHARS, MAX_CONFIG_MODEL_CHARS,
+  DEFAULT_MODEL_CONTEXT_CHARS, MAX_API_PROFILE_NOTE_CHARS, MAX_CONFIG_MODEL_CHARS,
+  MAX_MODEL_CONTEXT_CHARS, MIN_MODEL_CONTEXT_CHARS,
 } from './limits.js';
 import { normalizeLlmConfig } from './llm-config.js';
 
@@ -40,6 +41,31 @@ export function normalizeApiProfileModels(value) {
   return models;
 }
 
+export function normalizeApiModelContextChars(value, models, {
+  stored = false,
+} = {}) {
+  if (value !== undefined && (!value || typeof value !== 'object' || Array.isArray(value))) {
+    if (stored) return null;
+    throw new Error('BAD_MODEL_CONTEXT_CHARS');
+  }
+  const raw = value ?? {};
+  if (Object.keys(raw).some((model) => !models.includes(model))) {
+    if (stored) return null;
+    throw new Error('BAD_MODEL_CONTEXT_CHARS');
+  }
+  const normalized = {};
+  for (const model of models) {
+    const chars = raw[model] ?? DEFAULT_MODEL_CONTEXT_CHARS;
+    if (!Number.isInteger(chars)
+      || chars < MIN_MODEL_CONTEXT_CHARS || chars > MAX_MODEL_CONTEXT_CHARS) {
+      if (stored) return null;
+      throw new Error('BAD_MODEL_CONTEXT_CHARS');
+    }
+    normalized[model] = chars;
+  }
+  return normalized;
+}
+
 export function normalizeApiProfile(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || typeof value.id !== 'string' || !API_PROFILE_ID_PATTERN.test(value.id)) return null;
@@ -47,9 +73,14 @@ export function normalizeApiProfile(value) {
   const note = cleanText(value.note, MAX_API_PROFILE_NOTE_CHARS);
   if (!name) return null;
   let models;
+  let modelContextChars;
   let connection;
   try {
     models = normalizeApiProfileModels(value.models);
+    modelContextChars = normalizeApiModelContextChars(
+      value.modelContextChars, models, { stored: true },
+    );
+    if (!modelContextChars) return null;
     const selectedModel = typeof value.selectedModel === 'string'
       ? value.selectedModel.trim() : '';
     if (!models.includes(selectedModel)) return null;
@@ -64,7 +95,7 @@ export function normalizeApiProfile(value) {
   if (!createdAt || !updatedAt) return null;
   return {
     id: value.id, name, note, baseUrl: connection.baseUrl, apiKey: connection.apiKey,
-    models, selectedModel: connection.model, createdAt, updatedAt,
+    models, modelContextChars, selectedModel: connection.model, createdAt, updatedAt,
   };
 }
 
@@ -163,8 +194,9 @@ export function normalizeApiProfileInput(value) {
   const note = cleanText(value.note, MAX_API_PROFILE_NOTE_CHARS);
   if (!name) throw new Error('BAD_API_PROFILE_NAME');
   const models = normalizeApiProfileModels(value.models);
+  const modelContextChars = normalizeApiModelContextChars(value.modelContextChars, models);
   const selectedModel = typeof value.selectedModel === 'string'
     ? value.selectedModel.trim() : '';
   if (!models.includes(selectedModel)) throw new Error('BAD_API_PROFILE_MODEL');
-  return { name, note, models, selectedModel };
+  return { name, note, models, modelContextChars, selectedModel };
 }

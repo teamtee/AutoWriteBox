@@ -5,15 +5,30 @@ import {
   buildOutlineInstruction, buildSectionsInstruction, buildCoreFieldInstruction,
   buildBookTitleInstruction, buildChapterTitlesInstruction,
   DIGEST_INSTRUCTION, buildChapterReviewInstruction,
+  buildChapterPlanDraftInstruction, buildNarrativeDesignDraftInstruction,
 } from '../prompts.js';
 import {
   extractDigest as defaultExtract, extractGeneratedTitles,
   sanitizeGeneratedTitle, extractChapterReview, extractSectionsPlan,
+  extractChapterPlanDraft, extractNarrativeDesignDraft,
 } from '../llm.js';
 import {
   LLM_OUTPUT_JOIN_CHUNK_CHARS, MAX_LLM_OUTPUT_CHARS, MAX_WHIP_CHARS,
 } from '../limits.js';
-import { publicErrorCode } from '../http-error.js';
+import { buildChapterContextBudget } from '../context-budget.js';
+import { publicErrorCode, sendJsonError } from '../http-error.js';
+import { createClientAbortTracker } from '../client-abort.js';
+import {
+  chapterPlanReadiness, chapterPlanRevision, normalizeChapterPlan,
+} from '../chapter-plan-schema.js';
+import {
+  chapterPlanContinuityDiagnostics, chapterPlanWorldLinkAlignment,
+} from '../chapter-plan-quality.js';
+import { chapterPlanPromiseAlignment } from '../promise-ledger-schema.js';
+import { assertChapterOutputClean } from '../chapter-output-guard.js';
+import { worldRevealRoute } from '../world-bible.js';
+import { buildBookSummaryFromSectionSummaries } from '../generation-context.js';
+import { worldProgressPlanningState } from '../world-progress-schema.js';
 
 const VERSION_REVISION_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const DEFAULT_SSE_HEARTBEAT_MS = 15_000;
@@ -121,14 +136,21 @@ export async function writeSseEventWithBackpressure(res, obj, {
       const boundedTimeoutMs = Number.isSafeInteger(drainTimeoutMs) && drainTimeoutMs > 0
         ? drainTimeoutMs
         : DEFAULT_SSE_DRAIN_TIMEOUT_MS;
+      // 这是返回 Promise 的完成期限，不是后台保活任务。保持 timer 引用，
+      // 否则 Node 20 在没有其它活跃句柄时会让待决 Promise 永远不结算。
       timer = setTimeout(onTimeout, boundedTimeoutMs);
-      timer.unref?.();
     }
   });
 }
 const end = (res) => {
   if (!res.destroyed && !res.writableEnded) res.end();
 };
+
+function sendRouteError(res, error) {
+  if (res.destroyed || res.writableEnded) return;
+  if (res.headersSent) res.destroy(error);
+  else sendJsonError(res, error);
+}
 
 export function mountGenRoutes(app, deps = {}) {
   const streamChat = deps.streamChat;         // 由 index.js 注入真实实现
@@ -142,6 +164,113 @@ export function mountGenRoutes(app, deps = {}) {
     && deps.sseDrainTimeoutMs > 0
     ? deps.sseDrainTimeoutMs
     : DEFAULT_SSE_DRAIN_TIMEOUT_MS;
+
+  app.post('/api/gen/chapter-plan-draft', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      if (typeof nonStreamChat !== 'function') throw new Error('INTERNAL_ERROR');
+      const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+        ? req.body : {};
+      const expectedPlanRevision = requireVersionRevision(
+        body.expectedPlanRevision, 'BAD_CHAPTER_PLAN_REVISION',
+      );
+      const seedPlan = normalizeChapterPlan(body.seedPlan);
+      const snapshot = await store.readChapterGenerationContext(
+        body.bookId, body.sectionId, body.chapterId, {
+          signal: client.signal, chapterPlan: seedPlan,
+        },
+      );
+      if (chapterPlanRevision(snapshot.chapter.plan) !== expectedPlanRevision) {
+        throw new Error('CHAPTER_PLAN_CONFLICT');
+      }
+      const config = await store.readConfigForTask(
+        'chapter', { signal: client.signal, bookId: body.bookId },
+      );
+      const system = buildSystemPrompt(
+        snapshot.book.settings.core, snapshot.writingAssetContext?.text ?? '',
+        snapshot.book.settings.storyEngine,
+      );
+      const context = buildContext({
+        book: snapshot.book, section: snapshot.section,
+        prevChapter: snapshot.previousChapter,
+        bookChapterIndex: snapshot.bookChapterIndex,
+        chapterPlan: seedPlan,
+        currentContent: store.currentText(snapshot.chapter.body),
+      });
+      const designRaw = await nonStreamChat({
+        config, system, signal: client.signal,
+        messages: [{
+          role: 'user',
+          content: buildNarrativeDesignDraftInstruction({
+            chapterIndex: snapshot.chapter.index,
+            bookChapterIndex: snapshot.bookChapterIndex,
+            context,
+            seedPlan,
+            currentContent: store.currentText(snapshot.chapter.body),
+            incomingPlanCarryover: snapshot.incomingPlanCarryover,
+            previousPlan: snapshot.previousChapter?.plan,
+            previousChapter: snapshot.previousChapter,
+          }),
+        }],
+      });
+      await client.assertAliveAfterIo();
+      const narrativeDesign = extractNarrativeDesignDraft(designRaw);
+      if (!narrativeDesign) throw new Error('CHAPTER_PLAN_DRAFT_FAILED');
+      const raw = await nonStreamChat({
+        config, system, signal: client.signal,
+        messages: [{
+          role: 'user',
+          content: buildChapterPlanDraftInstruction({
+            chapterIndex: snapshot.chapter.index,
+            bookChapterIndex: snapshot.bookChapterIndex,
+            context,
+            seedPlan,
+            currentContent: store.currentText(snapshot.chapter.body),
+            recentReviewSignals: snapshot.recentReviewSignals,
+            incomingPlanCarryover: snapshot.incomingPlanCarryover,
+            fixedNarrativeDesign: narrativeDesign,
+            previousPlan: snapshot.previousChapter?.plan,
+            previousChapter: snapshot.previousChapter,
+          }),
+        }],
+      });
+      await client.assertAliveAfterIo();
+      const plan = extractChapterPlanDraft(raw, { narrativeDesign });
+      if (!plan) throw new Error('CHAPTER_PLAN_DRAFT_FAILED');
+      if (!chapterPlanContinuityDiagnostics(
+        snapshot.previousChapter?.plan, plan,
+      ).valid) throw new Error('CHAPTER_PLAN_DRAFT_FAILED');
+      const planPromiseAlignment = chapterPlanPromiseAlignment(
+        snapshot.book?.settings?.promiseLedger,
+        { bookChapterIndex: snapshot.bookChapterIndex, plan },
+      );
+      if (planPromiseAlignment.invalidReferences.length
+        || planPromiseAlignment.narrativeConflicts.length
+        || (planPromiseAlignment.requiresAction && !planPromiseAlignment.satisfied)
+        || !chapterPlanWorldLinkAlignment(
+          plan, snapshot.section?.outline?.content,
+        ).valid) {
+        throw new Error('CHAPTER_PLAN_DRAFT_FAILED');
+      }
+      const latest = await store.readChapterGenerationContext(
+        body.bookId, body.sectionId, body.chapterId, {
+          signal: client.signal, chapterPlan: seedPlan,
+        },
+      );
+      if (latest.planDraftContextRevision !== snapshot.planDraftContextRevision
+        || latest.targetRevision !== snapshot.targetRevision) {
+        throw new Error('GENERATION_CONTEXT_CONFLICT');
+      }
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) {
+        res.json({ plan, basePlanRevision: expectedPlanRevision });
+      }
+    } catch (error) {
+      sendRouteError(res, error);
+    } finally {
+      client.dispose();
+    }
+  });
 
   async function streamInto(req, res, { config, system, instruction }) {
     const fullChunks = [];
@@ -207,15 +336,24 @@ export function mountGenRoutes(app, deps = {}) {
       store.assertExpectedVersionRevision(targetVersioned, requestedRevision);
       const targetRevision = store.versionRevision(targetVersioned);
       const contextRevision = store.bookGenerationContextRevision(book);
-      const system = buildSystemPrompt(book.settings.core);
+      const writingAssetContext = p.type === 'core' && p.field === 'style'
+        ? await store.readWritingAssetContext(req.params.id, null, {
+          signal: res.locals.abortSignal,
+        })
+        : { text: '', revision: '' };
+      const coreForSystem = p.type === 'core'
+        ? { ...book.settings.core, [p.field]: undefined }
+        : book.settings.core;
+      const system = buildSystemPrompt(coreForSystem, '', book.settings.storyEngine);
       const instruction = p.type === 'outline'
         ? buildOutlineInstruction(book.premise)
-        : buildCoreFieldInstruction(p.field, book);
+        : buildCoreFieldInstruction(p.field, book, writingAssetContext.text);
       const full = await streamInto(req, res, { config, system, instruction });
       await assertClientAliveAfterIo(req, res);
       await store.commitGeneratedBookVersion(req.params.id, path, full, {
         expectedRevision: targetRevision,
         expectedContextRevision: contextRevision,
+        expectedWritingAssetRevision: writingAssetContext.revision,
         signal: res.locals.abortSignal,
       });
       send(res, { saved: true });
@@ -295,11 +433,23 @@ export function mountGenRoutes(app, deps = {}) {
       if (store.sectionPlanContextRevision(book) !== expectedContextRevision) {
         throw new Error('GENERATION_CONTEXT_CONFLICT');
       }
-      const system = buildSystemPrompt(book.settings.core);
+      const worldRoute = worldRevealRoute(store.currentText(book.settings.core.world));
+      if (!worldRoute.length) throw new Error('SECTION_PLAN_WORLD_BIBLE_REQUIRED');
+      const system = buildSystemPrompt(
+        book.settings.core, '', book.settings.storyEngine,
+      );
+      const occurredSummary = buildBookSummaryFromSectionSummaries(book);
+      const occurredSnapshot = occurredSummary;
+      const worldProgress = worldProgressPlanningState(
+        book.settings?.worldProgressState,
+        store.currentText(book.settings.core.world),
+      );
       const full = await streamInto(req, res, {
         config, system,
-        // outline 迁移后是 {versions,cursor}，需通过 currentText 读当前版本；直接 .content 会得到 undefined
-        instruction: buildSectionsInstruction(store.currentText(book.outline)),
+        instruction: buildSectionsInstruction({
+          outline: store.currentText(book.outline), worldRoute, occurredSummary,
+          startLayer: worldProgress.startLayer,
+        }),
       });
       await assertClientAliveAfterIo(req, res);
       const latestBook = await store.readBook(
@@ -308,7 +458,12 @@ export function mountGenRoutes(app, deps = {}) {
       if (store.sectionPlanContextRevision(latestBook) !== expectedContextRevision) {
         throw new Error('GENERATION_CONTEXT_CONFLICT');
       }
-      const parsed = extractSectionsPlan(full);
+      if (buildBookSummaryFromSectionSummaries(latestBook) !== occurredSnapshot) {
+        throw new Error('GENERATION_CONTEXT_CONFLICT');
+      }
+      const parsed = extractSectionsPlan(full, {
+        worldRoute, startLayer: worldProgress.startLayer,
+      });
       if (parsed) {
         send(res, {
           done: true,
@@ -351,6 +506,11 @@ export function mountGenRoutes(app, deps = {}) {
       if (whip !== undefined && typeof whip !== 'string') throw new Error('BAD_WHIP');
       if (mode === 'whip' && (typeof whip !== 'string' || !whip.trim())) throw new Error('BAD_WHIP');
       if (mode === 'whip' && whip.length > MAX_WHIP_CHARS) throw new Error('WHIP_TOO_LARGE');
+      // 旧版 next 会先建空章再直接续写，天然没有已确认策划可供门禁校验。
+      // 正式服务不注入此测试兼容开关，因此外部请求不能恢复这条绕过路径。
+      if (mode === 'next' && deps.allowLegacyNextForTests !== true) {
+        throw new Error('CHAPTER_PLAN_NOT_READY');
+      }
       const chapterConfigSelection = await store.readConfigForTaskSelection(
         'chapter', { signal: res.locals.abortSignal, bookId },
       );
@@ -384,17 +544,56 @@ export function mountGenRoutes(app, deps = {}) {
       if (mode !== 'next') {
         store.assertExpectedVersionRevision(chapter.body, body.expectedRevision);
       }
+      const savedCurrentContent = store.currentText(chapter.body);
+      if (mode === 'whip' && !savedCurrentContent.trim()) throw new Error('CHAPTER_EMPTY');
+      // 正常产品流程会先创建空章、确认策划，再以 rewrite 首次生成。
+      // 不能信任客户端布尔值决定是否执行质量门槛，否则直接调用 HTTP
+      // 接口即可绕过张力、伏笔、世界展开、场景因果与节奏意图。
+      const isFirstPlannedGeneration = mode !== 'next' && !savedCurrentContent.trim();
+      const planPromiseAlignment = chapterPlanPromiseAlignment(
+        book?.settings?.promiseLedger, { bookChapterIndex, plan: chapter.plan },
+      );
+      const planReadiness = chapterPlanReadiness(chapter.plan, {
+        promiseAlignment: planPromiseAlignment,
+        sectionOutline: section.outline?.content,
+        recentReviewSignals,
+        bookChapterIndex,
+        requireCurrentProtocol: isFirstPlannedGeneration,
+      });
+      // 策划不完整不再阻断生成：作者留白的判断会作为上下文明确交给模型，
+      // 由它在正文里做出具体选择。页面仍可用 requireReadyPlan 显式要求先补齐。
+      if (body.requireReadyPlan === true && !planReadiness.ready) {
+        throw new Error('CHAPTER_PLAN_NOT_READY');
+      }
 
-      const system = buildSystemPrompt(book.settings.core, writingAssetContext?.text ?? '');
-      const context = buildContext({ book, section, prevChapter });
       const currentContent = mode === 'whip' || mode === 'rewrite'
-        ? store.currentText(chapter.body)
+        ? savedCurrentContent
         : '';
-      if (mode === 'whip' && !currentContent.trim()) throw new Error('CHAPTER_EMPTY');
+      // 各字段上限之和已经越过模型输入硬上限，必须先按优先级分配总额，
+      // 否则满配作品会在装配阶段被硬拒绝。裁剪要显式告知模型。
+      const contextBudget = buildChapterContextBudget({
+        book, section, prevChapter, currentContent,
+        writingAssetContext: writingAssetContext?.text ?? '',
+      }, { modelContextChars: config.modelContextChars });
+      const system = buildSystemPrompt(
+        book.settings.core, writingAssetContext?.text ?? '', book.settings.storyEngine,
+        contextBudget.allocation,
+      );
+      const context = buildContext({
+        book, section, prevChapter, bookChapterIndex,
+        chapterPlan: chapter.plan, currentContent: savedCurrentContent,
+        budget: contextBudget.allocation, budgetTrimmed: contextBudget.trimmed,
+      });
       const instruction = context + '\n\n' +
-        buildChapterInstruction({ chapterIndex: chapter.index, bookChapterIndex, wordTarget: config.chapterWordTarget, mode, whip: whip?.trim(), currentContent, recentReviewSignals });
+        buildChapterInstruction({
+          chapterIndex: chapter.index, bookChapterIndex,
+          wordTarget: config.chapterWordTarget, mode, whip: whip?.trim(), planReadiness,
+          currentContent, recentReviewSignals, chapterPlan: chapter.plan,
+          budget: contextBudget.allocation,
+        });
 
       full = await streamInto(req, res, { config, system, instruction });
+      assertChapterOutputClean(full);
       const generatedFingerprint = store.contentFingerprint(full);
       // 在同一存储锁域内同时复核目标版本和所有提示词上下文，避免长耗时
       // 生成覆盖目标新版，或把基于旧大纲/设定/前情的正文落入新上下文。
@@ -497,6 +696,7 @@ export function mountGenRoutes(app, deps = {}) {
             book: reviewBook,
             section: reviewSection,
             chapter: reviewChapter,
+            previousChapter: reviewPreviousChapter,
             bookChapterIndex: reviewBookChapterIndex,
             recentReviewSignals: reviewRecentSignals,
             writingAssetContext: reviewWritingAssetContext,
@@ -504,29 +704,51 @@ export function mountGenRoutes(app, deps = {}) {
           } = reviewSnapshot;
         const reviewContent = store.currentText(reviewChapter.body);
         if (reviewContent.trim() && reviewChapter.bodyFingerprint === generatedFingerprint) {
+          const reviewConfig = chapterConfigSelection.source === 'book'
+            ? config
+            : await store.readConfigForTask(
+              'review', { signal: res.locals.abortSignal, bookId },
+            );
+          // 审稿同时携带完整上下文和完整正文，溢出风险与生成路径相同，
+          // 因此使用同一套分层预算；正文本身占用 currentContent 层。
+          const reviewBudget = buildChapterContextBudget({
+            book: reviewBook, section: reviewSection,
+            prevChapter: reviewPreviousChapter,
+            currentContent: reviewContent,
+            writingAssetContext: reviewWritingAssetContext?.text ?? '',
+          }, { modelContextChars: reviewConfig.modelContextChars });
           const reviewSystem = buildSystemPrompt(
             reviewBook.settings?.core, reviewWritingAssetContext?.text ?? '',
+            reviewBook.settings?.storyEngine, reviewBudget.allocation,
           );
-          const reviewContext = buildContext({ book: reviewBook, section: reviewSection });
+          const reviewContext = buildContext({
+            book: reviewBook, section: reviewSection,
+            prevChapter: reviewPreviousChapter,
+            bookChapterIndex: reviewBookChapterIndex,
+            chapterPlan: reviewChapter.plan, currentContent: reviewContent,
+            budget: reviewBudget.allocation, budgetTrimmed: reviewBudget.trimmed,
+          });
           const reviewInstruction = buildChapterReviewInstruction({
             chapterIndex: reviewChapter.index,
             bookChapterIndex: reviewBookChapterIndex,
             content: reviewContent,
             context: reviewContext,
             recentReviewSignals: reviewRecentSignals,
+            chapterPlan: reviewChapter.plan,
+            sectionOutline: reviewSection.outline?.content,
           });
-          const reviewConfig = chapterConfigSelection.source === 'book'
-            ? config
-            : await store.readConfigForTask(
-              'review', { signal: res.locals.abortSignal, bookId },
-            );
           const reviewRaw = await nonStreamChat({
             config: reviewConfig, system: reviewSystem,
             signal: res.locals.abortSignal,
             messages: [{ role: 'user', content: reviewInstruction }],
           });
           assertClientAlive(req, res);
-          const review = extractChapterReview(reviewRaw);
+          const review = extractChapterReview(reviewRaw, {
+            chapterPlan: reviewChapter.plan,
+            promiseLedger: reviewBook.settings?.promiseLedger,
+            chapterContent: reviewContent,
+            sectionOutline: reviewSection.outline?.content,
+          });
           if (review) {
             await assertClientAliveAfterIo(req, res);
             const savedReview = await store.saveChapterReview(bookId, sectionId, chapterId, review, {

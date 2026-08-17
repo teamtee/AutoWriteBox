@@ -9,8 +9,12 @@ function tree(): BookTree {
   return {
     book: {
       id: 'book-1', title: '连载书', titleSource: 'manual', outline: versioned,
-      settings: {
-        core: {
+    settings: {
+      storyEngine: {
+        readerExperience: '', protagonistAction: '', progression: '', cost: '', escalation: '',
+        revision: 'E'.repeat(43), isEmpty: true,
+      },
+      core: {
           world: versioned, style: versioned, constraints: versioned, pacing: versioned,
         },
         history: [],

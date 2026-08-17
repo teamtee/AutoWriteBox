@@ -8,6 +8,9 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as store from '../store.js';
 import {
+  mapWithConcurrency, withJsonReadSlot, withStoreLock,
+} from '../store/concurrency.js';
+import {
   MAX_BOOK_BACKUP_BYTES, MAX_BOOK_JSON_BYTES, MAX_CHAPTER_JSON_BYTES,
   MAX_CONFIG_JSON_BYTES, MAX_STORED_CHARACTERS,
   MAX_CHARACTER_NAME_CHARS, MAX_CHARACTER_ROLE_CHARS, MAX_CHARACTER_DESC_CHARS,
@@ -33,7 +36,7 @@ test('并发映射失败后停止派发新任务并等待在途任务收尾', as
   const started = [];
   let settled = false;
 
-  const operation = store.mapWithConcurrency([0, 1, 2], 2, async (item) => {
+  const operation = mapWithConcurrency([0, 1, 2], 2, async (item) => {
     started.push(item);
     if (item === 0) {
       await secondStarted;
@@ -64,7 +67,7 @@ test('已取消的作品锁等待者立即退出队列且不阻塞后续请求',
   let releaseHolder;
   let markHolderStarted;
   const holderStarted = new Promise((resolve) => { markHolderStarted = resolve; });
-  const holder = store.withStoreLock(lockKey, async () => {
+  const holder = withStoreLock(lockKey, async () => {
     markHolderStarted();
     await new Promise((resolve) => { releaseHolder = resolve; });
   });
@@ -79,7 +82,7 @@ test('已取消的作品锁等待者立即退出队列且不阻塞后续请求',
   ]);
 
   let successorCalled = false;
-  const successor = store.withStoreLock(lockKey, async () => {
+  const successor = withStoreLock(lockKey, async () => {
     successorCalled = true;
   });
   await new Promise((resolve) => setImmediate(resolve));
@@ -107,11 +110,11 @@ test('已取消的 JSON 读取等待者会移出全局队列', async () => {
   let markSecondStarted;
   const firstStarted = new Promise((resolve) => { markFirstStarted = resolve; });
   const secondStarted = new Promise((resolve) => { markSecondStarted = resolve; });
-  const first = store.withJsonReadSlot(async () => {
+  const first = withJsonReadSlot(async () => {
     markFirstStarted();
     await new Promise((resolve) => { releaseFirst = resolve; });
   });
-  const second = store.withJsonReadSlot(async () => {
+  const second = withJsonReadSlot(async () => {
     markSecondStarted();
     await new Promise((resolve) => { releaseSecond = resolve; });
   });
@@ -119,7 +122,7 @@ test('已取消的 JSON 读取等待者会移出全局队列', async () => {
 
   const controller = new AbortController();
   let queuedTaskCalled = false;
-  const queued = store.withJsonReadSlot(async () => {
+  const queued = withJsonReadSlot(async () => {
     queuedTaskCalled = true;
   }, { signal: controller.signal });
   controller.abort(new Error('CLIENT_ABORTED'));
@@ -130,7 +133,7 @@ test('已取消的 JSON 读取等待者会移出全局队列', async () => {
   releaseFirst();
   releaseSecond();
   await Promise.all([first, second]);
-  await assert.doesNotReject(() => store.withJsonReadSlot(async () => {}));
+  await assert.doesNotReject(() => withJsonReadSlot(async () => {}));
 });
 
 test('createBook 建书并可读回', async () => {
@@ -142,6 +145,17 @@ test('createBook 建书并可读回', async () => {
   const back = await store.readBook(book.id);
   assert.equal(back.title, '测试书');
   assert.equal(back.titleSource, 'manual');
+});
+
+test('默认书名清理设想空白并按 Unicode 字符安全截断', async () => {
+  const premise = `  ${'甲'.repeat(19)}😀后续设想  `;
+  const book = await store.createBook({ premise });
+
+  assert.equal(book.premise, `${'甲'.repeat(19)}😀后续设想`);
+  assert.equal(book.title, `${'甲'.repeat(19)}😀`);
+  assert.equal(book.titleSource, 'default');
+  assert.equal(Array.from(book.title).length, 20);
+  assert.equal(Array.from(book.title).at(-1), '😀');
 });
 
 test('createBook 通过暂存目录整书提交且不把内部标记带入作品', async () => {
@@ -495,6 +509,36 @@ test('单本 book.json 形态异常由诊断报告且不阻断其它健康作品
   assert.equal(diagnostics.ok, false);
   assert.ok(diagnostics.issues.some((issue) =>
     issue.code === 'BOOK_METADATA_INVALID_SHAPE' && issue.bookId === malformedId));
+});
+
+test('合法 JSON 但根节点不是对象时读取返回稳定存储错误', async () => {
+  const book = await store.createBook({ premise: '根节点形态检查' });
+  const section = await store.addSection(book.id, {});
+  const chapter = await store.addChapter(book.id, section.id, {});
+  const cases = [
+    {
+      path: join(root, 'books', book.id, 'book.json'),
+      read: () => store.readBook(book.id),
+    },
+    {
+      path: join(root, 'books', book.id, section.id, 'section.json'),
+      read: () => store.readSection(book.id, section.id),
+    },
+    {
+      path: join(root, 'books', book.id, section.id, `${chapter.id}.json`),
+      read: () => store.readChapter(book.id, section.id, chapter.id),
+    },
+  ];
+
+  for (const item of cases) {
+    const original = await readFile(item.path);
+    writeFileSync(item.path, 'null', 'utf8');
+    await assert.rejects(item.read, (error) => {
+      assert.equal(error.message, 'STORAGE_DATA_INVALID');
+      return true;
+    });
+    writeFileSync(item.path, original);
+  }
 });
 
 test('自动轻检报告会让作品从书架摘要消失的字段损坏', async () => {

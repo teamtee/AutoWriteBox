@@ -2,6 +2,12 @@ import { useEffect, useRef } from 'react';
 import { parseSectionTitles } from '../sections';
 import type { SectionPlan } from '../types';
 
+const gateOutcomeLabel = {
+  hold: '本部不解锁下一层',
+  'open-next': '本部完成门槛，下部进入下一层',
+  'complete-long': '完成长线层本轮阶段兑现',
+};
+
 export function sectionPlanOutline(plan: SectionPlan): string {
   return [
     `【本部概述】${plan.summary || '待进一步明确'}`,
@@ -12,6 +18,16 @@ export function sectionPlanOutline(plan: SectionPlan): string {
     `【阶段高潮】${plan.climax}`,
     `【阶段兑现 Payoff】${plan.payoff}`,
     `【结束状态变化】${plan.stateChange}`,
+    `【世界层级】${plan.worldProgression.layer}`,
+    `【世界阶段承诺】${plan.worldProgression.stagePromise}`,
+    `【可验证世界证据】${plan.worldProgression.evidence}`,
+    `【人物行动】${plan.worldProgression.characterAction}`,
+    `【世界选择与代价】${plan.worldProgression.choiceAndCost}`,
+    `【阶段认知增量】${plan.worldProgression.knowledgeGain}`,
+    `【本部保留未知】${plan.worldProgression.protectedUnknown}`,
+    `【下一层门槛】${plan.worldProgression.gateCondition}`,
+    `【门槛结果】${gateOutcomeLabel[plan.worldProgression.gateOutcome]}`,
+    `【门槛证据进度】${plan.worldProgression.gateProgress}`,
   ].join('\n');
 }
 
@@ -141,6 +157,18 @@ export function SectionPlanPanel({ text, titles, plans, streaming, adopting = fa
                     <p><b>高潮：</b>{plan.climax}</p>
                     <p><b>兑现：</b>{plan.payoff}</p>
                     <p><b>状态变化：</b>{plan.stateChange}</p>
+                    <div className="section-plan-world">
+                      <h4>🌍 {plan.worldProgression.layer}</h4>
+                      <p><b>阶段承诺：</b>{plan.worldProgression.stagePromise}</p>
+                      <p><b>可验证证据：</b>{plan.worldProgression.evidence}</p>
+                      <p><b>人物行动：</b>{plan.worldProgression.characterAction}</p>
+                      <p><b>选择与代价：</b>{plan.worldProgression.choiceAndCost}</p>
+                      <p><b>认知增量：</b>{plan.worldProgression.knowledgeGain}</p>
+                      <p><b>保留未知：</b>{plan.worldProgression.protectedUnknown}</p>
+                      <p><b>进入门槛：</b>{plan.worldProgression.gateCondition}</p>
+                      <p><b>门槛结果：</b>{gateOutcomeLabel[plan.worldProgression.gateOutcome]}</p>
+                      <p><b>证据进度：</b>{plan.worldProgression.gateProgress}</p>
+                    </div>
                   </article>
                 ))}
               </div>

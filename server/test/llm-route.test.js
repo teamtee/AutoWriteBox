@@ -53,7 +53,7 @@ test('真实重写路由不保存缺少终止标记的部分输出', async () =>
   });
 });
 
-test('真实下一章路由在部分输出断流后删除未落盘的新章', async () => {
+test('真实下一章旧路由在调用上游前拒绝，不创建空章或接收正文', async () => {
   const book = await store.createBook({ premise: 'p', title: 't' });
   const section = await store.addSection(book.id, {});
   const updatedAtBeforeGeneration = (await store.readBook(book.id)).updatedAt;
@@ -69,8 +69,8 @@ test('真实下一章路由在部分输出断流后删除未落盘的新章', as
       }),
     });
     const sse = await response.text();
-    assert.match(sse, /半截内容/);
-    assert.match(sse, /LLM_STREAM_INCOMPLETE/);
+    assert.match(sse, /CHAPTER_PLAN_NOT_READY/);
+    assert.doesNotMatch(sse, /半截内容/);
     assert.deepEqual((await store.readSection(book.id, section.id)).chapters, []);
     assert.equal((await store.readBook(book.id)).updatedAt, updatedAtBeforeGeneration);
   });

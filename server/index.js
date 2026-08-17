@@ -285,6 +285,8 @@ export function attachServerLifecycle(server, {
     }
     shuttingDown = true;
     logger.log(`收到 ${signal}，正在等待进行中的请求安全结束…`);
+    // 关闭期限是安全清理链的完成条件，必须保持事件循环；否则在没有
+    // 活跃 socket 但 close 回调尚未送达时，Node 20 可能跳过 cleanup 退出。
     forceTimer = setTimeout(() => {
       forced = true;
       processRef.exitCode = 1;
@@ -292,7 +294,6 @@ export function attachServerLifecycle(server, {
       server.closeAllConnections?.();
       if (serverClosed) void finish(closeError);
     }, Math.max(0, shutdownTimeoutMs));
-    forceTimer.unref?.();
     try {
       server.close((error) => {
         serverClosed = true;

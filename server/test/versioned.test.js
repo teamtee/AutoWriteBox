@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { parseVersionPath } from '../store.js';
 import {
-  emptyVersioned, currentText, commitVersion, moveCursor, migrateVersioned, parseVersionPath,
-} from '../store.js';
+  commitVersion, currentText, emptyVersioned, migrateVersioned, moveCursor,
+} from '../store/versioned.js';
 
 test('emptyVersioned/currentText', () => {
   const v = emptyVersioned();

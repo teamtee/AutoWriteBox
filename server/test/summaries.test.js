@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import * as store from '../store.js';
 import { buildContext } from '../prompts.js';
 import {
-  buildBookSummaryFromSectionSummaries, generationPriorSectionSummary,
+  bookSectionSummaryWindow, buildBookSummaryFromSectionSummaries,
+  generationPriorSectionSummary,
 } from '../generation-context.js';
 import { cleanupTestTempDirs, makeTestTempDir } from './test-temp-dir.js';
 
@@ -111,6 +112,52 @@ test('跨分部摘要预算保留最近剧情并明确标记更早内容省略',
   assert.doesNotMatch(summary, /分部1：/);
 });
 
+test('长篇跨部前情同时保留最近分部与本章点名的久远旧部', () => {
+  const sections = Array.from({ length: 14 }, (_, index) => `section-${index + 1}`);
+  const sectionSummaries = Object.fromEntries(sections.map((id, sectionIndex) => [id, {
+    index: sectionIndex + 1,
+    title: `分部${sectionIndex + 1}`,
+    summary: Array.from({ length: 100 }, (_, chapterIndex) => {
+      if (sectionIndex === 1 && chapterIndex === 40) {
+        return `第${chapterIndex + 1}章：沈星钥匙被埋进旧王陵，只有陆昭知道入口`;
+      }
+      return `第${chapterIndex + 1}章：第${sectionIndex + 1}部普通剧情${'旧'.repeat(40)}`;
+    }).join('\n'),
+  }]));
+  const book = {
+    sections,
+    sectionSummaries,
+    memory: { facts: [{
+      status: 'active', subject: '沈星钥匙', aliases: ['星钥'],
+      predicate: '位置', object: '旧王陵',
+    }] },
+  };
+
+  const prior = generationPriorSectionSummary(book, 'section-14', 8_000, {
+    taskRelevantText: '本章要找回星钥并进入旧王陵',
+  });
+
+  assert.match(prior, /第2部 · 分部2/u, '久远但直接相关的第2部必须召回');
+  assert.match(prior, /沈星钥匙被埋进旧王陵/u);
+  assert.match(prior, /第13部 · 分部13/u, '最近分部仍是直接连续性的底座');
+  assert.match(prior, /更早分部剧情已因上下文预算省略/u);
+  assert.ok(prior.length <= 8_000);
+});
+
+test('单部分部摘要超限时保留开场、相关旧条目和收尾，不再只切尾窗', () => {
+  const lines = Array.from({ length: 120 }, (_, index) =>
+    index === 0 ? '第1章：主角离开故乡'
+      : index === 50 ? '第51章：沈星钥匙被封进旧王陵'
+        : index === 119 ? '第120章：北境战争结束'
+          : `第${index + 1}章：普通过渡剧情${'中'.repeat(30)}`);
+  const window = bookSectionSummaryWindow(lines.join('\n'), 1_000, ['沈星钥匙']);
+  assert.match(window, /主角离开故乡/u);
+  assert.match(window, /沈星钥匙被封进旧王陵/u);
+  assert.match(window, /北境战争结束/u);
+  assert.match(window, /条章节摘要因预算省略/u);
+  assert.ok(window.length <= 1_000);
+});
+
 test('阶段摘要可编辑冻结，并代替已覆盖分部进入后续上下文', async () => {
   const book = await store.createBook({ premise: '阶段摘要', title: '长篇' });
   const first = await store.addSection(book.id, { title: '起航' });
@@ -176,6 +223,24 @@ test('来源改变后草稿阶段摘要标记过期并退出上下文，冻结�
   assert.equal(library.stageSummaries[0].stale, false);
   prior = generationPriorSectionSummary(await store.readBook(book.id), second.id);
   assert.match(prior, /作者冻结的旧事版本/);
+
+  const changedAgain = await store.readChapter(book.id, first.id, chapter.id);
+  await store.versionSet(
+    book.id, `section:${first.id}:chapter:${chapter.id}`, '主角最终决定烧毁城门。',
+    { expectedRevision: store.versionRevision(changedAgain.body) },
+  );
+  const finalChapter = await store.readChapter(book.id, first.id, chapter.id);
+  await store.applyChapterDigest(book.id, first.id, chapter.id, {
+    summary: '主角烧毁城门', progress: '与旧城彻底决裂',
+    newCharacters: [], memoryCandidates: [],
+  }, { expectedBodyFingerprint: finalChapter.bodyFingerprint });
+  library = await store.readBookMemory(book.id);
+  assert.equal(library.stageSummaries[0].stale, true);
+  prior = generationPriorSectionSummary(await store.readBook(book.id), second.id);
+  assert.match(prior, /作者冻结版与当前来源不一致/);
+  assert.match(prior, /以当前正文派生摘要为已发生事实/);
+  assert.match(prior, /作者冻结的旧事版本/);
+  assert.match(prior, /主角烧毁城门/);
 });
 
 test('阶段摘要重算用来源指纹阻止迟到结果，并跟随整书备份', async () => {

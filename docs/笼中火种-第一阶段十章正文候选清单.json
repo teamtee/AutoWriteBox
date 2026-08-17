@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "kind": "chapter-draft-candidate-manifest",
+  "status": "candidate-only",
+  "bookId": "book_8d9180a777eb60664f14bc8c4dd40e2c",
+  "bookTitle": "笼中火种",
+  "source": {
+    "sectionId": "section-01",
+    "chapterId": "chapter-01",
+    "bodyFingerprint": "trxvPIbTcpKdqV9lmIE3-VpPhQZLCj1H3kjLitF2dr0"
+  },
+  "totalNonWhitespaceCharacters": 35592,
+  "blindReadExport": {
+    "path": "./笼中火种-第一阶段十章盲读稿.txt",
+    "bodyFingerprint": "lB1pp1zhEqvi8pHSNrjGTEloeWVUb6amWdfpJ52qsTA",
+    "contains": "书名、章名和十章纯正文；不含策划、审读、评分或作者说明"
+  },
+  "chapters": [
+    {
+      "index": 1,
+      "title": "十二个火种",
+      "path": "./笼中火种-第01章十二个火种-正文候选.txt",
+      "nonWhitespaceCharacters": 2872,
+      "bodyFingerprint": "WRdeiyM-2ofM_QduKWf9zpQ8JeZG7u2dF2d0b8pM3oI"
+    },
+    {
+      "index": 2,
+      "title": "狼群循味",
+      "path": "./笼中火种-第02章狼群循味-正文候选.txt",
+      "nonWhitespaceCharacters": 3447,
+      "bodyFingerprint": "MC0gK11XGxf780JvtdlczzVwZrdRtKFIrItP43XRXA8"
+    },
+    {
+      "index": 3,
+      "title": "葬麦",
+      "path": "./笼中火种-第03章葬麦-正文候选.txt",
+      "nonWhitespaceCharacters": 3171,
+      "bodyFingerprint": "vIjwE5sZ5JaTFKzC5OXFRSrqaIpPMqb5GpnoqrY-HuU"
+    },
+    {
+      "index": 4,
+      "title": "第五道刻痕",
+      "path": "./笼中火种-第04章第五道刻痕-正文候选.txt",
+      "nonWhitespaceCharacters": 3965,
+      "bodyFingerprint": "W-FzaKRvYcYBbIYr_c9dHT6Y6rXQGIdhgfvPLdLtUoY"
+    },
+    {
+      "index": 5,
+      "title": "水边的客人",
+      "path": "./笼中火种-第05章水边的客人-正文候选.txt",
+      "nonWhitespaceCharacters": 4220,
+      "bodyFingerprint": "JP6meXHz9WxKeP_BD0ig8YvcNak0zx-AQ9eAjl3muVA"
+    },
+    {
+      "index": 6,
+      "title": "被写好的敌人",
+      "path": "./笼中火种-第06章被写好的敌人-正文候选.txt",
+      "nonWhitespaceCharacters": 4038,
+      "bodyFingerprint": "myh_iFxhgpb8ya2C2PyEk_CUVFypZVvLKLs7SGbqo4U"
+    },
+    {
+      "index": 7,
+      "title": "三百人的山下",
+      "path": "./笼中火种-第07章三百人的山下-正文候选.txt",
+      "nonWhitespaceCharacters": 4130,
+      "bodyFingerprint": "wJIEkvw64-KpQIxacfZcQwfd_0uuDbA4RxOjGdScbLg"
+    },
+    {
+      "index": 8,
+      "title": "S级展演",
+      "path": "./笼中火种-第08章S级展演-正文候选.txt",
+      "nonWhitespaceCharacters": 3112,
+      "bodyFingerprint": "o8-wAY-mfZqHTW2JYI4p0LqUViktBvfeXpVNmcDK5gw"
+    },
+    {
+      "index": 9,
+      "title": "种麦",
+      "path": "./笼中火种-第09章种麦-正文候选.txt",
+      "nonWhitespaceCharacters": 3236,
+      "bodyFingerprint": "4CUFjBrBk-ouV5OmovFdUscmkTbVMJp825cibNH-pBU"
+    },
+    {
+      "index": 10,
+      "title": "第二次火种",
+      "path": "./笼中火种-第10章第二次火种-正文候选.txt",
+      "nonWhitespaceCharacters": 3401,
+      "bodyFingerprint": "_bd-mgezSG5yrZfDbX5g8McDT79xGHcfUNQ0UFQiFMY"
+    }
+  ],
+  "rules": [
+    "清单与正文均为候选资产，不得自动覆盖正式书库。",
+    "任何正文修订都会产生新指纹，真人盲读记录不得跨指纹合并。",
+    "编辑自审和模型评分不能替代独立真人第一次阅读。"
+  ]
+}

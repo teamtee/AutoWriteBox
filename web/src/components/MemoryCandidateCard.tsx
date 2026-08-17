@@ -73,7 +73,7 @@ export function MemoryCandidateCard({
   return (
     <section className="memory-card sketch">
       <header>
-        <div><h3>长期记忆候选</h3><p>AI 提取内容默认不是事实；确认后才会进入后续章节上下文。</p></div>
+        <div><h3>长期记忆候选</h3><p>正文中主体和值均可精确定位的最高重要度事实会自动采纳；其余仍需确认，自动项可随时否决。</p></div>
         <span>{candidates.filter((candidate) => candidate.status === 'pending').length} 条待确认</span>
       </header>
       {error && <div className="memory-message error" role="alert">{error}</div>}
@@ -86,8 +86,12 @@ export function MemoryCandidateCard({
           <div className="memory-row-head">
             <span className="memory-kind">{KIND_LABELS[candidate.kind]}</span>
             <strong>{candidate.subject}</strong>
+            {!!candidate.aliases?.length && <span>别名：{candidate.aliases.join('、')}</span>}
             <span>{candidate.predicate}</span>
-            <span className="memory-status">{STATUS_LABELS[candidate.status]}</span>
+            <span className="memory-status">
+              {candidate.autoAccepted && candidate.status === 'accepted'
+                ? '自动采纳' : STATUS_LABELS[candidate.status]}
+            </span>
           </div>
           <p>{candidate.object}</p>
           {candidate.evidence && <small>依据：{candidate.evidence}</small>}
@@ -106,6 +110,12 @@ export function MemoryCandidateCard({
                   onClick={() => { void decide(candidate, 'accept'); }}>确认事实</button>}
             <button className="hbtn" disabled={!!busyId}
               onClick={() => { void decide(candidate, 'reject'); }}>忽略候选</button>
+          </div>}
+          {candidate.status === 'accepted' && candidate.autoAccepted && <div className="memory-actions">
+            <button className="hbtn" disabled={!!busyId}
+              onClick={() => { void decide(candidate, 'reject'); }}>
+              {busyId === candidate.id ? '否决中…' : '否决自动采纳'}
+            </button>
           </div>}
         </article>
       ))}</div>

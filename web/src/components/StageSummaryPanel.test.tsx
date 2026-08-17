@@ -30,6 +30,15 @@ describe('StageSummaryPanel', () => {
     expect(html).toContain('+新建阶段');
   });
 
+  it('冻结摘要来源变化时明确说明当前正文事实优先', () => {
+    const html = renderToStaticMarkup(<StageSummaryPanel
+      bookId="book-1" sections={sections} items={[{ ...stage, status: 'frozen' }]}
+      revision={'R'.repeat(43)} onReload={async () => true} />);
+    expect(html).toContain('有冻结阶段摘要的来源已经变化');
+    expect(html).toContain('以当前正文派生事实为准');
+    expect(html).toContain('按需解冻并重算');
+  });
+
   it('空库提示每 3–5 个分部建立一份', () => {
     const html = renderToStaticMarkup(<StageSummaryPanel
       bookId="book-1" sections={sections} items={[]}

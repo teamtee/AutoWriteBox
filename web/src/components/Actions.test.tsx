@@ -38,11 +38,11 @@ describe('Actions whip draft protection', () => {
 
     expect(html).toContain('保留这条长指令');
     expect(html).toContain('aria-label="抽打修改要求"');
-    expect(html).toMatch(/disabled=""[^>]*>✍️ 生成下一章<\/button>/);
+    expect(html).toMatch(/disabled=""[^>]*>➕ 建立下一章并策划<\/button>/);
     expect(html).not.toMatch(/disabled=""[^>]*>🗯️ 抽<\/button>/);
   });
 
-  it('distinguishes safe navigation from a model generation request', () => {
+  it('distinguishes safe navigation from establishing a planned next chapter', () => {
     const navigateHtml = renderToStaticMarkup(
       <Actions {...callbacks} streaming={false} disabled={false}
         hasExistingNextChapter whip="" />,
@@ -53,7 +53,8 @@ describe('Actions whip draft protection', () => {
 
     expect(navigateHtml).toContain('➡️ 下一章');
     expect(navigateHtml).not.toContain('生成下一章');
-    expect(generateHtml).toContain('✍️ 生成下一章');
+    expect(generateHtml).toContain('➕ 建立下一章并策划');
+    expect(generateHtml).not.toContain('生成下一章');
   });
 
   it('does not offer generation beyond an empty last chapter', () => {

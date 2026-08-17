@@ -30,13 +30,18 @@ test('API 方案保存多个模型并可显式激活其中一个', async () => {
   const empty = await store.readApiProfiles();
   const saved = await store.saveApiProfile({
     name: '主服务', note: '正文与大纲', useCurrentConfig: true,
-    models: ['model-a', 'model-b', 'model-a'], selectedModel: 'model-a',
+    models: ['model-a', 'model-b', 'model-a'],
+    modelContextChars: { 'model-a': 32000, 'model-b': 128000 },
+    selectedModel: 'model-a',
   }, {
     expectedRevision: empty.revision,
     expectedConfigRevision: store.configRevision(await store.readConfig()),
   });
   assert.deepEqual(saved.profile.models, ['model-a', 'model-b']);
   assert.equal(saved.profile.apiKey, 'sk-one');
+  assert.deepEqual(saved.profile.modelContextChars, {
+    'model-a': 32000, 'model-b': 128000,
+  });
 
   const beforeConfig = await store.readConfig();
   const activated = await store.activateApiProfile(saved.profile.id, 'model-b', {
@@ -44,6 +49,7 @@ test('API 方案保存多个模型并可显式激活其中一个', async () => {
     expectedConfigRevision: store.configRevision(beforeConfig),
   });
   assert.equal(activated.config.model, 'model-b');
+  assert.equal(activated.config.modelContextChars, 128000);
   assert.equal((await store.readConfig()).apiKey, 'sk-one');
   assert.equal(activated.library.activeProfileId, saved.profile.id);
   assert.equal(activated.library.profiles[0].selectedModel, 'model-b');
@@ -55,6 +61,26 @@ test('API 方案保存多个模型并可显式激活其中一个', async () => {
   }, { expectedRevision: activated.library.revision });
   assert.equal((await store.readApiProfiles()).activeProfileId, null);
   assert.equal(edited.profile.apiKey, 'sk-one');
+});
+
+test('旧 API 方案缺少模型窗口时迁移为 50 万，非法映射拒绝保存', async () => {
+  const library = await store.readApiProfiles();
+  const saved = await store.saveApiProfile({
+    name: '旧式方案', note: '', baseUrl: 'https://legacy.example/v1', apiKey: '',
+    models: ['legacy-model'], selectedModel: 'legacy-model',
+  }, { expectedRevision: library.revision });
+  assert.deepEqual(saved.profile.modelContextChars, { 'legacy-model': 500000 });
+
+  for (const modelContextChars of [
+    { 'legacy-model': 15999 },
+    { 'legacy-model': 32000, 'unknown-model': 64000 },
+  ]) {
+    await assert.rejects(() => store.saveApiProfile({
+      id: saved.profile.id, name: '旧式方案', note: '',
+      baseUrl: saved.profile.baseUrl, apiKey: '', models: ['legacy-model'],
+      modelContextChars, selectedModel: 'legacy-model',
+    }, { expectedRevision: saved.revision }), /BAD_MODEL_CONTEXT_CHARS/u);
+  }
 });
 
 test('保存当前连接会拒绝已过期的配置快照', async () => {
@@ -254,6 +280,9 @@ test('正文、大纲、摘要、审稿和标题可显式分配模型', async ()
   const saved = await store.saveApiProfile({
     name: '分工服务', baseUrl: 'https://roles.example/v1', apiKey: 'sk-roles',
     models: ['writer', 'summarizer', 'reviewer', 'namer'],
+    modelContextChars: {
+      writer: 32000, summarizer: 64000, reviewer: 128000, namer: 16000,
+    },
     selectedModel: 'writer', note: '',
   }, { expectedRevision: library.revision });
   library = await store.readApiProfiles();
@@ -274,17 +303,20 @@ test('正文、大纲、摘要、审稿和标题可显式分配模型', async ()
   assert.equal(chapterConfig.baseUrl, 'https://roles.example/v1');
   assert.equal(chapterConfig.apiKey, 'sk-roles');
   assert.equal(chapterConfig.model, 'writer');
+  assert.equal(chapterConfig.modelContextChars, 32000);
   assert.equal(chapterConfig.chapterWordTarget, 3456);
   assert.equal(chapterConfig.requestTimeoutMs, 123456);
   assert.equal((await store.readConfigForTask('outline')).model, 'default-model');
+  assert.equal((await store.readConfigForTask('digest')).modelContextChars, 64000);
+  assert.equal((await store.readConfigForTask('review')).modelContextChars, 128000);
+  assert.equal((await store.readConfigForTask('title')).modelContextChars, 16000);
   assert.equal((await store.readConfigForTask('digest')).model, 'summarizer');
   assert.equal((await store.readConfigForTask('review')).model, 'reviewer');
   assert.equal((await store.readConfigForTask('title')).model, 'namer');
   for (const task of ['chapter', 'outline', 'digest', 'review', 'title']) {
-    assert.equal(
-      (await store.readConfigForTask(task, { bookId: fixedBook.id })).model,
-      'reviewer',
-    );
+    const fixedConfig = await store.readConfigForTask(task, { bookId: fixedBook.id });
+    assert.equal(fixedConfig.model, 'reviewer');
+    assert.equal(fixedConfig.modelContextChars, 128000);
   }
 
   await assert.rejects(() => store.saveApiTaskRoutes({

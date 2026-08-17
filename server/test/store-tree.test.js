@@ -236,6 +236,7 @@ test('readBookStructure 只返回章节元数据，正文按引用单独读取',
     status: 'done',
     hasContent: true,
     characterCount: 4,
+    reviewCurrent: false,
     publicationStatus: 'unpublished',
   });
   assert.equal(summary.body, undefined);
@@ -254,10 +255,22 @@ test('作品树投影统计存稿字数并区分发布状态，不加载正文�
   let summary = (await store.readBookStructure(bookId)).sections[0].chapters[0];
   assert.equal(summary.characterCount, 3);
   assert.equal(summary.publicationStatus, 'unpublished');
+  assert.equal(summary.reviewCurrent, false);
   assert.equal(summary.body, undefined);
   assert.equal(summary.content, undefined);
 
   const current = await store.readChapter(bookId, section.id, chapter.id);
+  const reviewContext = await store.readChapterReviewContext(bookId, section.id, chapter.id);
+  await store.saveChapterReview(bookId, section.id, chapter.id, {
+    score: 80, verdict: '当前正文审稿',
+    issues: [{ title: '已核对', detail: '当前正文已完成一次有效审稿。' }],
+    suggestions: [{ label: '保持', instruction: '保留当前正文已经成立的因果链。' }],
+  }, {
+    expectedBodyFingerprint: reviewContext.chapter.bodyFingerprint,
+    expectedContextRevision: reviewContext.contextRevision,
+  });
+  summary = (await store.readBookStructure(bookId)).sections[0].chapters[0];
+  assert.equal(summary.reviewCurrent, true);
   await store.publishChapterVersion(bookId, section.id, chapter.id, {
     expectedBodyFingerprint: current.bodyFingerprint,
     expectedMemoryRevision: store.bookMemoryRevision(await store.readBook(bookId)),
@@ -275,6 +288,7 @@ test('作品树投影统计存稿字数并区分发布状态，不加载正文�
   });
   summary = (await store.readBookStructure(bookId)).sections[0].chapters[0];
   assert.equal(summary.publicationStatus, 'modified');
+  assert.equal(summary.reviewCurrent, false);
   assert.equal(summary.characterCount, 4);
   assert.equal(summary.publishedCharacterCount, 3);
 });
@@ -973,6 +987,23 @@ test('语法正确但非规范的结构事务不会新增或删除作品数据',
     issue.code === 'SECTION_STRUCTURE_TRANSACTION_INVALID'
       && issue.bookId === bookId
       && issue.sectionId === section.id));
+
+  // 章末交接快照属于派生连续性数据。即使事务其它字段合法，损坏快照也
+  // 只能留待诊断，不能在重启恢复时接入作品树。
+  unlinkSync(sectionTransaction);
+  const invalidChapter = {
+    ...chapter, id: 'chapter-02', index: 2, title: '损坏快照章',
+    handoff: { location: ['旧桥'] },
+  };
+  await store.atomicWriteJson(sectionTransaction, {
+    format: 'auto-novel-box-structure-transaction', version: 1, type: 'add-chapter',
+    bookId, sectionId: section.id, chapterId: invalidChapter.id, chapter: invalidChapter,
+  });
+  recovery = await store.recoverInterruptedTransactions();
+  assert.equal(recovery.recovered, 0);
+  assert.deepEqual((await store.readSection(bookId, section.id)).chapters, [chapter.id]);
+  assert.equal(existsSync(join(sectionRoot, `${invalidChapter.id}.json`)), false);
+  assert.equal(existsSync(sectionTransaction), true);
 });
 
 test('恢复不会把同 ID 但内容不同的孤立分部或章节接入索引', async () => {

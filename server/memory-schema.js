@@ -2,6 +2,7 @@ import {
   MAX_MEMORY_CANDIDATES_PER_CHAPTER, MAX_MEMORY_EVIDENCE_CHARS,
   MAX_MEMORY_DETAIL_CHARS, MAX_MEMORY_DETAIL_PARTICIPANTS,
   MAX_MEMORY_DETAILS_TOTAL_CHARS,
+  MAX_MEMORY_ALIASES, MAX_MEMORY_ALIAS_CHARS,
   MAX_MEMORY_OBJECT_CHARS, MAX_MEMORY_PREDICATE_CHARS, MAX_MEMORY_SUBJECT_CHARS,
 } from './limits.js';
 
@@ -40,6 +41,26 @@ function cleanText(value, limit) {
   return typeof value === 'string'
     ? Array.from(value.trim()).slice(0, limit).join('')
     : '';
+}
+
+export function sanitizeMemoryAliases(value, subject = '') {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set(subject ? [subject] : []);
+  return value.slice(0, MAX_MEMORY_ALIASES).flatMap((item) => {
+    const alias = cleanText(item, MAX_MEMORY_ALIAS_CHARS);
+    if (!alias || seen.has(alias)) return [];
+    seen.add(alias);
+    return [alias];
+  });
+}
+
+export function normalizeStoredMemoryAliases(value, subject = '') {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_MEMORY_ALIASES) return null;
+  const aliases = sanitizeMemoryAliases(value, subject);
+  if (aliases.length !== value.length
+    || aliases.some((alias, index) => alias !== value[index])) return null;
+  return aliases;
 }
 
 function cleanMemoryDetailParticipants(value) {
@@ -123,15 +144,18 @@ export function sanitizeMemoryCandidates(value) {
   return value.slice(0, MAX_MEMORY_CANDIDATES_PER_CHAPTER).flatMap((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)
       || !MEMORY_KIND_SET.has(item.kind)) return [];
+    const subject = cleanText(item.subject, MAX_MEMORY_SUBJECT_CHARS);
     const candidate = {
       kind: item.kind,
-      subject: cleanText(item.subject, MAX_MEMORY_SUBJECT_CHARS),
+      subject,
       predicate: cleanText(item.predicate, MAX_MEMORY_PREDICATE_CHARS),
       object: cleanText(item.object, MAX_MEMORY_OBJECT_CHARS),
       evidence: cleanText(item.evidence, MAX_MEMORY_EVIDENCE_CHARS),
       importance: Number.isInteger(item.importance)
         ? Math.max(1, Math.min(5, item.importance)) : 3,
     };
+    const aliases = sanitizeMemoryAliases(item.aliases, subject);
+    if (aliases.length) candidate.aliases = aliases;
     const details = sanitizeMemoryDetails(item.details, item.kind);
     if (details) candidate.details = details;
     // 关系三元组本身已经包含两端和类型；即使兼容模型漏掉 details，
@@ -159,10 +183,12 @@ export function normalizeStoredMemoryCandidate(value) {
   }
   const [candidate] = sanitizeMemoryCandidates([value]);
   const details = normalizeStoredMemoryDetails(value.details, candidate?.kind);
-  if (details === null) return null;
+  const aliases = normalizeStoredMemoryAliases(value.aliases, candidate?.subject);
+  if (details === null || aliases === null) return null;
   return candidate ? {
     id: value.id,
     ...candidate,
+    ...(aliases.length ? { aliases } : {}),
     ...(details ? { details } : {}),
     sourceFingerprint: value.sourceFingerprint,
     extractedAt: value.extractedAt,

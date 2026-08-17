@@ -16,7 +16,8 @@ export function shouldDisableNextChapter(
     || (chapterEmpty && !hasExistingNextChapter);
 }
 
-// 章节专属动作条：已有后续章时只导航；当前章有正文且位于末尾时才允许生成下一章。
+// 章节专属动作条：已有后续章时只导航；当前章有正文且位于末尾时建立下一章，
+// 让作者先完成策划门槛，再从正文编辑器生成，避免连续写作绕过写前检查。
 export function Actions({ streaming, disabled = false, hasExistingNextChapter = false, chapterEmpty = false, whip, onWhipChange, onNext, onWhip, onStop }: {
   streaming: boolean;
   disabled?: boolean;
@@ -41,7 +42,7 @@ export function Actions({ streaming, disabled = false, hasExistingNextChapter = 
               onClick={onNext}>
               {hasExistingNextChapter
                 ? '➡️ 下一章'
-                : chapterEmpty ? '请先生成本章' : '✍️ 生成下一章'}
+                : chapterEmpty ? '请先生成本章' : '➕ 建立下一章并策划'}
             </button>
           </div>
           <div className="whip-row">

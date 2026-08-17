@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "kind": "chapter-draft-candidate-manifest",
+  "status": "candidate-only",
+  "bookId": "book_8d9180a777eb60664f14bc8c4dd40e2c",
+  "bookTitle": "笼中火种",
+  "range": {
+    "from": 11,
+    "to": 20,
+    "arc": "第二次火种：把失败记忆变成第一次无伤改写"
+  },
+  "dependsOn": {
+    "previousManifest": "./笼中火种-第一阶段十章正文候选清单.json",
+    "chapter10Fingerprint": "_bd-mgezSG5yrZfDbX5g8McDT79xGHcfUNQ0UFQiFMY",
+    "chapterPlan": "./笼中火种-第二循环第11至20章策划候选.json",
+    "chapterPlanFingerprint": "jj_CSr3aHrIxm9G5NwxOKLsRgmLVH1DKmfN2aJr3_HQ"
+  },
+  "totalNonWhitespaceCharacters": 21231,
+  "chapters": [
+    {
+      "index": 11,
+      "title": "腿还在",
+      "path": "./笼中火种-第11章腿还在-正文候选.txt",
+      "nonWhitespaceCharacters": 2646,
+      "bodyFingerprint": "gQdC5yBC9HIgT7f0afFFPAnP6MXGcLK7H_c2ZjhvHe4"
+    },
+    {
+      "index": 12,
+      "title": "六年前的烟",
+      "path": "./笼中火种-第12章六年前的烟-正文候选.txt",
+      "nonWhitespaceCharacters": 2226,
+      "bodyFingerprint": "0TCadv49riyYil7y6Rl-cpOtDmkbPT0vgky6fctdPxo"
+    },
+    {
+      "index": 13,
+      "title": "苦井未苦",
+      "path": "./笼中火种-第13章苦井未苦-正文候选.txt",
+      "nonWhitespaceCharacters": 2329,
+      "bodyFingerprint": "2JUNm3VecI7flgsjl510EG6cnYSTcE5Add-hxS5bwOo"
+    },
+    {
+      "index": 14,
+      "title": "第十三个火种",
+      "path": "./笼中火种-第14章第十三个火种-正文候选.txt",
+      "nonWhitespaceCharacters": 1970,
+      "bodyFingerprint": "TbzLXB3sXy7DCqK7kDUaDBdr7mxVgyGsdd6dFDbw2hk"
+    },
+    {
+      "index": 15,
+      "title": "提前六年的旱季",
+      "path": "./笼中火种-第15章提前六年的旱季-正文候选.txt",
+      "nonWhitespaceCharacters": 2011,
+      "bodyFingerprint": "jSOQKnF2WpydcA1T7idrnqWTaZBl607uUXqhr0HJIRE"
+    },
+    {
+      "index": 16,
+      "title": "先挖渠后谈敌人",
+      "path": "./笼中火种-第16章先挖渠后谈敌人-正文候选.txt",
+      "nonWhitespaceCharacters": 1850,
+      "bodyFingerprint": "6rdloZ_drFmaWwQGd-aqxszeAu5HIMiwy3lfJ4SSmK4"
+    },
+    {
+      "index": 17,
+      "title": "一场没有死人的战争",
+      "path": "./笼中火种-第17章一场没有死人的战争-正文候选.txt",
+      "nonWhitespaceCharacters": 1937,
+      "bodyFingerprint": "newJrIDJeQGHNzBg2wksWJPsyOFTK0-UtZR9sUpl-do"
+    },
+    {
+      "index": 18,
+      "title": "没有奖励",
+      "path": "./笼中火种-第18章没有奖励-正文候选.txt",
+      "nonWhitespaceCharacters": 1386,
+      "bodyFingerprint": "I4WWRq2dkYUehoI5rjSNMfE1N4atVDrtYUOiCoeh02k"
+    },
+    {
+      "index": 19,
+      "title": "空白的人",
+      "path": "./笼中火种-第19章空白的人-正文候选.txt",
+      "nonWhitespaceCharacters": 2247,
+      "bodyFingerprint": "K2mxtKHgoIxNf_nqq9-kLCPq3PamwfCUnC4b7vbNXSE"
+    },
+    {
+      "index": 20,
+      "title": "零样本",
+      "path": "./笼中火种-第20章零样本-正文候选.txt",
+      "nonWhitespaceCharacters": 2629,
+      "bodyFingerprint": "9TOI81XYauMGBKbC_IEk6ZDN6Q65otj8sqFNvDDtdTE"
+    }
+  ],
+  "rules": [
+    "清单、策划与正文均为候选资产，不得自动覆盖正式书库或写入已发生事实。",
+    "任何正文修订都会产生新指纹，审读结论不得跨指纹沿用。",
+    "第二循环编辑自审不能替代至少一名未参与创作的真人连续首读。",
+    "空、另一位观察者和现实零伤亡映射目前仅是候选剧情，不得提前进入正式长期记忆。"
+  ]
+}

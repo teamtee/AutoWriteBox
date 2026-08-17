@@ -10,6 +10,7 @@ import { createApp } from '../index.js';
 import {
   MAX_CHAPTER_WORD_TARGET, MAX_CONFIG_API_KEY_CHARS,
   MAX_CONFIG_BASE_URL_CHARS, MAX_CONFIG_JSON_BYTES, MAX_CONFIG_MODEL_CHARS,
+  MIN_CHAPTER_WORD_TARGET,
 } from '../limits.js';
 import { startTestServer, stopTestServer } from './http-test-server.js';
 import { cleanupTestTempDirs, makeTestTempDir } from './test-temp-dir.js';
@@ -47,11 +48,11 @@ test('POST 保存后 GET 返回掩码 Key', async () => {
     const initial = await getPublicConfig();
     assert.match(initial.revision, /^[A-Za-z0-9_-]{43}$/);
     const post = await postConfig({
-      baseUrl: 'https://x/v1', model: 'm', apiKey: 'sk-secret', chapterWordTarget: 1500,
+      baseUrl: 'https://x/v1', model: 'm', apiKey: 'sk-secret', chapterWordTarget: 3500,
     }, initial.revision);
     const saved = await post.json();
     assert.equal(saved.apiKey, 'sk-****');
-    assert.equal(saved.chapterWordTarget, 1500);
+    assert.equal(saved.chapterWordTarget, 3500);
     assert.match(saved.revision, /^[A-Za-z0-9_-]{43}$/);
     assert.notEqual(saved.revision, initial.revision);
     const get = await getPublicConfig();
@@ -135,8 +136,9 @@ test('配置保存复用模型连接校验并在落盘前规范化字段', async
       baseUrl: 'https://example.test/v1',
       model: 'model-name',
       apiKey: 'sk-secret',
-      chapterWordTarget: 2000,
+      chapterWordTarget: 3000,
       requestTimeoutMs: 300000,
+      modelContextChars: 500000,
     });
 
     for (const baseUrl of [
@@ -189,8 +191,9 @@ test('配置保存拒绝控制字符且不落盘密钥或不可见模型名', as
         baseUrl: 'https://example.test/v1',
         model: 'stable-model',
         apiKey: 'sk-stable',
-        chapterWordTarget: 2000,
+        chapterWordTarget: 3000,
         requestTimeoutMs: 300000,
+        modelContextChars: 500000,
       });
     }
   });
@@ -236,7 +239,7 @@ test('旧设置页面不能覆盖另一页面已经保存的新配置', async ()
     assert.deepEqual(await staleSave.json(), { error: 'CONFIG_CONFLICT' });
     const actual = await store.readConfig();
     assert.equal(actual.model, 'new-model');
-    assert.equal(actual.chapterWordTarget, 2000);
+    assert.equal(actual.chapterWordTarget, 3000);
   });
 });
 
@@ -247,8 +250,9 @@ test('保存响应丢失后用相同旧修订号重放同一目标配置可幂�
       baseUrl: 'https://retry.example/v1',
       model: 'retry-model',
       apiKey: 'sk-retry-secret',
-      chapterWordTarget: 2600,
+      chapterWordTarget: 3600,
       requestTimeoutMs: 180000,
+      modelContextChars: 500000,
     };
 
     const firstResponse = await postConfig(target, page.revision);
@@ -264,6 +268,31 @@ test('保存响应丢失后用相同旧修订号重放同一目标配置可幂�
     assert.deepEqual(await differentReplay.json(), { error: 'CONFIG_CONFLICT' });
     assert.deepEqual(await store.readConfig(), target);
   });
+});
+
+test('模型上下文窗口随全局配置保存并执行安全边界', async () => {
+  const initial = await store.readConfig();
+  const saved = await store.writeConfig({ modelContextChars: 32000 }, {
+    expectedRevision: store.configRevision(initial),
+  });
+  assert.equal(saved.modelContextChars, 32000);
+  assert.equal((await store.readConfig()).modelContextChars, 32000);
+
+  for (const modelContextChars of [15999, 2000001, 32000.5, '32000']) {
+    await assert.rejects(
+      () => store.writeConfig({ modelContextChars }),
+      /BAD_MODEL_CONTEXT_CHARS/u,
+    );
+  }
+  assert.equal((await store.readConfig()).modelContextChars, 32000);
+});
+
+test('模型上下文窗口缺失的旧配置迁移为 50 万字符默认值', async () => {
+  await store.atomicWriteJson(join(root, 'config.json'), {
+    baseUrl: '', model: '', apiKey: '', chapterWordTarget: 3000,
+    requestTimeoutMs: 300000,
+  }, { mode: 0o600 });
+  assert.equal((await store.readConfig()).modelContextChars, 500000);
 });
 
 test('配置文件以仅当前用户可读写的权限创建', async () => {
@@ -331,15 +360,40 @@ test('数据根链接不会把配置读写到外部目录', {
 
 test('非法每章目标字数返回 JSON 错误且不覆盖旧值', async () => {
   await withServer(async () => {
-    await postConfig({ chapterWordTarget: 1800 });
+    await postConfig({ chapterWordTarget: 3800 });
 
     const r = await postConfig({ chapterWordTarget: 0 });
 
     assert.equal(r.status, 400);
     const body = await r.json();
     assert.match(body.error, /BAD_CHAPTER_WORD_TARGET/);
-    assert.equal((await store.readConfig()).chapterWordTarget, 1800);
+    assert.equal((await store.readConfig()).chapterWordTarget, 3800);
   });
+});
+
+test('低于体量下限的每章目标字数被拒绝保存', async () => {
+  await withServer(async () => {
+    await postConfig({ chapterWordTarget: MIN_CHAPTER_WORD_TARGET });
+
+    const r = await postConfig({ chapterWordTarget: MIN_CHAPTER_WORD_TARGET - 1 });
+
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).error, /BAD_CHAPTER_WORD_TARGET/);
+    assert.equal(
+      (await store.readConfig()).chapterWordTarget, MIN_CHAPTER_WORD_TARGET,
+    );
+  });
+});
+
+test('旧配置低于体量下限时上提而不判为损坏', async () => {
+  writeFileSync(join(root, 'config.json'), JSON.stringify({
+    baseUrl: 'https://legacy.example/v1', model: 'legacy-model', apiKey: 'sk-legacy',
+    chapterWordTarget: 2_000,
+  }), 'utf8');
+
+  const saved = await store.readConfig();
+  assert.equal(saved.baseUrl, 'https://legacy.example/v1');
+  assert.equal(saved.chapterWordTarget, MIN_CHAPTER_WORD_TARGET);
 });
 
 test('非法 API 超时值返回 JSON 错误且不覆盖旧值', async () => {
@@ -445,7 +499,7 @@ test('读取配置时丢弃磁盘里类型非法的已知字段', async () => {
     assert.equal(cfg.baseUrl, '');
     assert.equal(cfg.model, '');
     assert.equal(cfg.apiKey, '');
-    assert.equal(cfg.chapterWordTarget, 2000);
+    assert.equal(cfg.chapterWordTarget, 3000);
   });
 });
 
@@ -534,7 +588,7 @@ test('未配置 Base URL 时生成请求返回明确错误且不改大纲', asyn
 test('配置存储层拒绝超大数值和文本且不覆盖旧值', async () => {
   await store.writeConfig({
     baseUrl: 'https://old.example/v1', model: 'old-model', apiKey: 'sk-old',
-    chapterWordTarget: 1800,
+    chapterWordTarget: 3800,
   });
 
   await assert.rejects(
@@ -553,5 +607,5 @@ test('配置存储层拒绝超大数值和文本且不覆盖旧值', async () =>
   assert.equal(saved.baseUrl, 'https://old.example/v1');
   assert.equal(saved.model, 'old-model');
   assert.equal(saved.apiKey, 'sk-old');
-  assert.equal(saved.chapterWordTarget, 1800);
+  assert.equal(saved.chapterWordTarget, 3800);
 });

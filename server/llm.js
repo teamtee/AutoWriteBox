@@ -1,4 +1,7 @@
 import {
+  MAX_CHAPTER_PLAN_FIELD_CHARS, MAX_CHAPTER_PLAN_NOTES_CHARS,
+  MAX_CHAPTER_PLAN_SCENES, MAX_CHAPTER_PLAN_SCENE_FIELD_CHARS,
+  MAX_CHAPTER_PLAN_SCENE_TITLE_CHARS,
   MAX_CHARACTER_DESC_CHARS, MAX_CHARACTER_NAME_CHARS, MAX_CHARACTER_ROLE_CHARS,
   MAX_CONCURRENT_LLM_REQUESTS, MAX_DIGEST_CHARACTERS, MAX_DIGEST_PROGRESS_CHARS,
   MAX_DIGEST_SUMMARY_CHARS, MAX_LLM_INPUT_CHARS, MAX_LLM_OUTPUT_CHARS,
@@ -14,6 +17,25 @@ import { sanitizeMemoryCandidates } from './memory-schema.js';
 import {
   normalizeChapterReviewChecks, normalizeChapterReviewSignals,
 } from './chapter-review-schema.js';
+import { chapterPlanReadiness, normalizeChapterPlan } from './chapter-plan-schema.js';
+import {
+  chapterPlanQualityDiagnostics, TENSION_CONTRACT_LABELS,
+  FORESHADOWING_CONTRACT_LABELS_V3, WORLD_EXPANSION_CONTRACT_LABELS,
+} from './chapter-plan-quality.js';
+import { normalizeChapterPlanComparison } from './chapter-plan-review-schema.js';
+import {
+  normalizeChapterReviewPromiseCandidates,
+} from './chapter-review-promise-schema.js';
+import {
+  normalizeChapterReviewWorldGateCandidates,
+} from './chapter-review-world-schema.js';
+import { normalizeGoldenThreeReview } from './golden-three-review-schema.js';
+import { normalizeSectionPlans } from './section-plan-schema.js';
+import { emptyChapterHandoff, normalizeChapterHandoff } from './chapter-handoff-schema.js';
+import { CHAPTER_RHYTHM_FINGERPRINT_OPTIONS } from './chapter-review-schema.js';
+import {
+  narrativeDesignPlanFields, normalizeNarrativeDesign,
+} from './narrative-design-schema.js';
 
 export { MAX_LLM_OUTPUT_CHARS } from './limits.js';
 export { normalizeLlmConfig as validateLlmConfig } from './llm-config.js';
@@ -227,11 +249,12 @@ export async function discoverLlmModels({ config, signal }) {
   const configuredTimeout = Number.isFinite(validatedConfig.requestTimeoutMs)
     ? validatedConfig.requestTimeoutMs : MAX_LLM_MODEL_DISCOVERY_TIMEOUT_MS;
   const timeoutMs = Math.min(configuredTimeout, MAX_LLM_MODEL_DISCOVERY_TIMEOUT_MS);
+  // 该期限负责结算当前 API 调用；保持 timer 引用，确保最低支持的 Node 20
+  // 不会在 mocked/失常 fetch 没有活跃句柄时留下永久待决 Promise。
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort(new Error('LLM_TIMEOUT'));
   }, timeoutMs);
-  timer.unref?.();
   try {
     const headers = { Accept: 'application/json' };
     if (validatedConfig.apiKey) headers.Authorization = `Bearer ${validatedConfig.apiKey}`;
@@ -310,11 +333,12 @@ export async function* streamChat({ config, system, messages, signal }) {
   if (signal?.aborted) forwardAbort();
   else signal?.addEventListener('abort', forwardAbort, { once: true });
   const timeoutMs = Number.isFinite(validatedConfig.requestTimeoutMs) ? validatedConfig.requestTimeoutMs : 300000;
+  // 与模型流 Promise 同生命周期的超时不能 unref；否则 Node 20 可在超时
+  // 触发前结束事件循环，调用方既收不到成功也收不到 LLM_TIMEOUT。
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort(new Error('LLM_TIMEOUT'));
   }, timeoutMs);
-  timer.unref?.();
   try {
     const headers = { 'Content-Type': 'application/json' };
     if (validatedConfig.apiKey) headers.Authorization = `Bearer ${validatedConfig.apiKey}`;
@@ -450,7 +474,9 @@ export function sanitizeGeneratedTitle(raw, unit = '') {
   return Array.from(text).slice(0, 10).join('');
 }
 
-export function sanitizeChapterReview(obj) {
+export function sanitizeChapterReview(obj, {
+  chapterPlan, promiseLedger, chapterContent, sectionOutline,
+} = {}) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
   const score = typeof obj.score === 'number' ? Math.max(0, Math.min(100, Math.round(obj.score))) : null;
   if (score === null) return null;
@@ -486,14 +512,61 @@ export function sanitizeChapterReview(obj) {
 
   if (suggestions.length < 1) return null;
 
-  const webFictionChecks = normalizeChapterReviewChecks(obj.webFictionChecks, {
-    truncate: true,
-  });
-  if (webFictionChecks === null) return null;
   const webFictionSignals = normalizeChapterReviewSignals(obj.webFictionSignals, {
-    truncate: true,
+    truncate: true, requireRhythmFingerprint: obj.webFictionSignals !== undefined,
   });
   if (webFictionSignals === null) return null;
+  const declaredCost = webFictionSignals?.rhythmFingerprint?.costType;
+  const declaredHook = webFictionSignals?.rhythmFingerprint?.hookMechanism;
+  const webFictionChecks = normalizeChapterReviewChecks(obj.webFictionChecks, {
+    truncate: true, chapterContent,
+    requireProseHumanityEvidence: typeof chapterContent === 'string',
+    requireStyleRiskEvidence: typeof chapterContent === 'string',
+    requirePayoffEvidence: typeof chapterContent === 'string',
+    requireGoldenEvidence: typeof chapterContent === 'string',
+    requirePremiseEvidence: typeof chapterContent === 'string',
+    requireGoalEvidence: typeof chapterContent === 'string',
+    requireObstacleEvidence: typeof chapterContent === 'string',
+    requireSceneEvidence: typeof chapterContent === 'string',
+    requireIncrementEvidence: typeof chapterContent === 'string',
+    requireChoiceEvidence: typeof chapterContent === 'string',
+    requireCostEvidence: typeof chapterContent === 'string'
+      && declaredCost !== undefined && declaredCost !== 'none',
+    requireHookEvidence: typeof chapterContent === 'string'
+      && declaredHook !== undefined && declaredHook !== 'none',
+    requireTensionEvidence: typeof chapterContent === 'string',
+    requireLongArcEvidence: typeof chapterContent === 'string',
+  });
+  if (webFictionChecks === null) return null;
+  const planComparison = normalizeChapterPlanComparison(obj.planComparison, {
+    truncate: true,
+    ...(chapterPlan === undefined ? {} : { chapterPlan, requireForPlanned: true }),
+  });
+  if (planComparison === null) return null;
+  if (chapterPlan?.rhythmIntentVersion === 1 && webFictionSignals?.rhythmFingerprint) {
+    const rhythmItem = planComparison?.items.find((item) => item.target === 'rhythmIntent');
+    const rhythmMatches = Object.entries(chapterPlan.rhythmIntent ?? {})
+      .every(([field, value]) => webFictionSignals.rhythmFingerprint[field] === value);
+    if (!rhythmItem
+      || (rhythmMatches && rhythmItem.outcome !== 'fulfilled')
+      || (!rhythmMatches && rhythmItem.outcome === 'fulfilled')) return null;
+  }
+  const promiseLedgerCandidates = normalizeChapterReviewPromiseCandidates(
+    obj.promiseLedgerCandidates,
+    {
+      chapterPlan, promiseLedger, chapterContent,
+      requireForActions: true, truncate: true,
+    },
+  );
+  if (promiseLedgerCandidates === null) return null;
+  const worldGateCandidates = normalizeChapterReviewWorldGateCandidates(
+    obj.worldGateCandidates,
+    {
+      sectionOutline, chapterContent,
+      requireForContract: sectionOutline !== undefined, truncate: true,
+    },
+  );
+  if (worldGateCandidates === null) return null;
 
   return {
     score,
@@ -502,6 +575,9 @@ export function sanitizeChapterReview(obj) {
     suggestions,
     ...(webFictionChecks === undefined ? {} : { webFictionChecks }),
     ...(webFictionSignals === undefined ? {} : { webFictionSignals }),
+    ...(planComparison === undefined ? {} : { planComparison }),
+    ...(promiseLedgerCandidates === undefined ? {} : { promiseLedgerCandidates }),
+    ...(worldGateCandidates === undefined ? {} : { worldGateCandidates }),
   };
 }
 
@@ -560,39 +636,242 @@ function extractFirstJsonObject(text) {
   return null;
 }
 
-export function extractSectionsPlan(text) {
-  const obj = extractFirstJsonObject(text);
-  if (!obj || !Array.isArray(obj.sections) || obj.sections.length < 2) return null;
-  const cleanText = (v, maxLen) => {
-    if (typeof v !== 'string') return '';
-    return Array.from(v.trim()).slice(0, maxLen).join('');
-  };
-  const sections = obj.sections
-    .filter((s) => s && typeof s.title === 'string' && s.title.trim())
-    .slice(0, MAX_PLANNED_SECTIONS)
-    .map((s) => {
-      const summary = cleanText(s.summary, MAX_SECTION_PLAN_FIELD_CHARS);
-      const fallback = summary || '待进一步明确';
-      return {
-        title: sanitizeGeneratedTitle(cleanText(s.title, 8)),
-        summary,
-        promise: cleanText(s.promise, MAX_SECTION_PLAN_FIELD_CHARS) || fallback,
-        goal: cleanText(s.goal, MAX_SECTION_PLAN_FIELD_CHARS) || fallback,
-        obstacle: cleanText(s.obstacle, MAX_SECTION_PLAN_FIELD_CHARS) || '待进一步明确',
-        progress: cleanText(s.progress, MAX_SECTION_PLAN_FIELD_CHARS) || fallback,
-        climax: cleanText(s.climax, MAX_SECTION_PLAN_FIELD_CHARS) || '待进一步明确',
-        payoff: cleanText(s.payoff, MAX_SECTION_PLAN_FIELD_CHARS) || '待进一步明确',
-        stateChange: cleanText(s.stateChange, MAX_SECTION_PLAN_FIELD_CHARS) || fallback,
-      };
-    })
-    .filter((s) => s.title);
-  return sections.length >= 2 ? sections : null;
-}
-
-export function extractChapterReview(text) {
+export function extractSectionsPlan(text, options) {
   const obj = extractFirstJsonObject(text);
   if (!obj) return null;
-  return sanitizeChapterReview(obj);
+  // 无 options 是早期单元调用的兼容解析；真实分部 API 始终传入
+  // options，并执行新的世界层级硬合同。
+  if (options === undefined) {
+    if (!Array.isArray(obj.sections) || obj.sections.length < 2) return null;
+    const cleanText = (value, maxLength) => typeof value === 'string'
+      ? Array.from(value.trim()).slice(0, maxLength).join('') : '';
+    const sections = obj.sections.filter((section) => section
+      && typeof section.title === 'string' && section.title.trim())
+      .slice(0, MAX_PLANNED_SECTIONS).map((section) => {
+        const summary = cleanText(section.summary, MAX_SECTION_PLAN_FIELD_CHARS);
+        const fallback = summary || '待进一步明确';
+        return {
+          title: sanitizeGeneratedTitle(cleanText(section.title, 8)),
+          summary,
+          promise: cleanText(section.promise, MAX_SECTION_PLAN_FIELD_CHARS) || fallback,
+          goal: cleanText(section.goal, MAX_SECTION_PLAN_FIELD_CHARS) || fallback,
+          obstacle: cleanText(section.obstacle, MAX_SECTION_PLAN_FIELD_CHARS)
+            || '待进一步明确',
+          progress: cleanText(section.progress, MAX_SECTION_PLAN_FIELD_CHARS) || fallback,
+          climax: cleanText(section.climax, MAX_SECTION_PLAN_FIELD_CHARS)
+            || '待进一步明确',
+          payoff: cleanText(section.payoff, MAX_SECTION_PLAN_FIELD_CHARS)
+            || '待进一步明确',
+          stateChange: cleanText(section.stateChange, MAX_SECTION_PLAN_FIELD_CHARS) || fallback,
+        };
+      }).filter((section) => section.title);
+    return sections.length >= 2 ? sections : null;
+  }
+  const {
+    worldRoute = [], allowAdvancedStart = false, startLayer,
+  } = options;
+  return normalizeSectionPlans(obj.sections, {
+    sanitizeTitle: sanitizeGeneratedTitle,
+    worldRoute, allowAdvancedStart, startLayer,
+  });
+}
+
+function contractSections(value, labels) {
+  if (typeof value !== 'string') return null;
+  const escaped = labels.map((label) => label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'));
+  const pattern = new RegExp(`(${escaped.join('|')})\\s*[：:]`, 'gu');
+  const matches = [...value.matchAll(pattern)];
+  if (!matches.length) return null;
+  const sections = {};
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const start = (match.index ?? 0) + match[0].length;
+    const end = matches[index + 1]?.index ?? value.length;
+    sections[match[1]] = value.slice(start, end).replace(/^[\s；;]+|[\s；;]+$/gu, '');
+  }
+  return sections;
+}
+
+function buildContract(labels, sections) {
+  return labels.filter((label) => sections[label])
+    .map((label) => `${label}：${sections[label]}`).join('；');
+}
+
+function compactContract(value, labels, maxLength) {
+  if (typeof value !== 'string') return '';
+  if (Array.from(value).length <= maxLength) return value;
+  const sections = contractSections(value, labels);
+  if (!sections || labels.some((label) => !sections[label])) {
+    return Array.from(value).slice(0, maxLength).join('');
+  }
+  const overhead = Array.from(labels.map((label) => `${label}：`).join('；')).length;
+  const budget = Math.max(labels.length * 4, maxLength - overhead);
+  const rows = labels.map((label) => Array.from(sections[label]));
+  let low = 0;
+  let high = Math.max(...rows.map((row) => row.length));
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    const used = rows.reduce((sum, row) => sum + Math.min(row.length, middle), 0);
+    if (used <= budget) low = middle;
+    else high = middle - 1;
+  }
+  const limits = rows.map((row) => Math.min(row.length, low));
+  let spare = budget - limits.reduce((sum, length) => sum + length, 0);
+  for (let index = 0; spare > 0 && index < rows.length; index = (index + 1) % rows.length) {
+    if (limits[index] < rows[index].length) {
+      limits[index] += 1;
+      spare -= 1;
+    }
+    if (rows.every((row, rowIndex) => limits[rowIndex] >= row.length)) break;
+  }
+  return buildContract(labels, Object.fromEntries(labels.map((label, index) => [
+    label, rows[index].slice(0, limits[index]).join(''),
+  ])));
+}
+
+function canonicalizeTension(value, { choice, payoff, hook }) {
+  const sections = contractSections(value, TENSION_CONTRACT_LABELS) ?? {};
+  if (!sections['压力来源'] || !sections['变化链']) return value;
+  let nodes = sections['变化链'].split(/\s*(?:→|⇒|->|—>)\s*/u).filter(Boolean);
+  if (nodes.length < 3) nodes = sections['变化链'].split(/\s*[；;]\s*/u).filter(Boolean);
+  if (nodes.length >= 3) {
+    sections['变化链'] = nodes.map((node, index) => index
+      && !/^(?:因此|于是|这迫使|该行动|其结果)/u.test(node) ? `因此${node}` : node).join('→');
+  }
+  sections['选择高点'] ||= choice;
+  sections['兑现与余波'] ||= [payoff, hook].filter(Boolean).join('；');
+  return compactContract(
+    buildContract(TENSION_CONTRACT_LABELS, sections),
+    TENSION_CONTRACT_LABELS, MAX_CHAPTER_PLAN_FIELD_CHARS,
+  );
+}
+
+function canonicalizeForeshadowing(value) {
+  const sections = contractSections(value, FORESHADOWING_CONTRACT_LABELS_V3);
+  if (!sections || FORESHADOWING_CONTRACT_LABELS_V3.some((label) => !sections[label])) {
+    return value;
+  }
+  if (!/[→⇒]|->|—>/u.test(sections['认知变化'])) {
+    const source = sections['认知变化'];
+    let normalized = source.replace(
+      /[，,]?(?:(?:本章(?:结束)?后)|(?:本章通过[^，,；;]{0,100}[，,]))?(?:使读者|读者)?(?:现在|转而)?(?:知道|认识到|意识到|确认|判断为)/u,
+      '→',
+    );
+    if (normalized === source) {
+      const boundary = source.search(/[；;。]/u);
+      if (boundary >= 4 && boundary < source.length - 4) {
+        normalized = `${source.slice(0, boundary)}→${source.slice(boundary + 1)}`;
+      }
+    }
+    sections['认知变化'] = normalized;
+  }
+  return compactContract(
+    buildContract(FORESHADOWING_CONTRACT_LABELS_V3, sections),
+    FORESHADOWING_CONTRACT_LABELS_V3, MAX_CHAPTER_PLAN_FIELD_CHARS,
+  );
+}
+
+function canonicalizeWorldExpansion(value) {
+  if (typeof value !== 'string') return '';
+  const source = /边界增量\/机制深化\s*[：:]/u.test(value) ? value : value
+    .replace(/(?:边界增量|机制深化)\s*[：:]/u, '边界增量/机制深化：');
+  return compactContract(
+    source, WORLD_EXPANSION_CONTRACT_LABELS, MAX_CHAPTER_PLAN_FIELD_CHARS,
+  );
+}
+
+function canonicalizeRhythmIntent(value) {
+  if (!isRecord(value)) return value;
+  const normalized = { ...value };
+  if (!CHAPTER_RHYTHM_FINGERPRINT_OPTIONS.resolutionMethod
+    .includes(normalized.resolutionMethod)
+    && CHAPTER_RHYTHM_FINGERPRINT_OPTIONS.pressurePattern
+      .includes(normalized.resolutionMethod)) {
+    normalized.resolutionMethod = 'mixed';
+  }
+  return normalized;
+}
+
+export function extractNarrativeDesignDraft(text) {
+  const parsed = extractFirstJsonObject(text);
+  const obj = parsed?.design && isRecord(parsed.design) ? parsed.design : parsed;
+  try { return normalizeNarrativeDesign(obj); } catch { return null; }
+}
+
+export function extractChapterPlanDraft(text, { narrativeDesign } = {}) {
+  const parsed = extractFirstJsonObject(text);
+  const obj = parsed?.plan && isRecord(parsed.plan) ? parsed.plan : parsed;
+  let fixedDesign = null;
+  try {
+    if (narrativeDesign) fixedDesign = narrativeDesignPlanFields(narrativeDesign);
+  } catch { return null; }
+  if (!isRecord(obj) || obj.qualityProtocolVersion !== 3
+    || (!fixedDesign && obj.designProtocolVersion !== 1)
+    || obj.rhythmIntentVersion !== 1 || !isRecord(obj.rhythmIntent)
+    || !Array.isArray(obj.scenes) || obj.scenes.length < 1) return null;
+  const clean = (value, maxLength) => typeof value === 'string'
+    ? Array.from(value.trim()).slice(0, maxLength).join('')
+    : '';
+  const plan = {
+    qualityProtocolVersion: 3,
+    designProtocolVersion: fixedDesign?.designProtocolVersion ?? 1,
+    rhythmIntentVersion: 1,
+    rhythmIntent: canonicalizeRhythmIntent(obj.rhythmIntent),
+    goal: clean(obj.goal, MAX_CHAPTER_PLAN_FIELD_CHARS),
+    obstacle: clean(obj.obstacle, MAX_CHAPTER_PLAN_FIELD_CHARS),
+    choice: clean(obj.choice, MAX_CHAPTER_PLAN_FIELD_CHARS),
+    payoff: clean(obj.payoff, MAX_CHAPTER_PLAN_FIELD_CHARS),
+    hook: clean(obj.hook, MAX_CHAPTER_PLAN_FIELD_CHARS),
+    tensionArc: canonicalizeTension(obj.tensionArc, {
+      choice: clean(obj.choice, MAX_CHAPTER_PLAN_FIELD_CHARS),
+      payoff: clean(obj.payoff, MAX_CHAPTER_PLAN_FIELD_CHARS),
+      hook: clean(obj.hook, MAX_CHAPTER_PLAN_FIELD_CHARS),
+    }),
+    foreshadowing: canonicalizeForeshadowing(obj.foreshadowing),
+    worldExpansion: canonicalizeWorldExpansion(obj.worldExpansion),
+    decisionChain: fixedDesign?.decisionChain
+      ?? clean(obj.decisionChain, MAX_CHAPTER_PLAN_FIELD_CHARS),
+    knowledgeDesign: fixedDesign?.knowledgeDesign
+      ?? clean(obj.knowledgeDesign, MAX_CHAPTER_PLAN_FIELD_CHARS),
+    notes: clean(obj.notes, MAX_CHAPTER_PLAN_NOTES_CHARS),
+    scenes: obj.scenes.slice(0, MAX_CHAPTER_PLAN_SCENES).map((scene) => ({
+      title: clean(scene?.title, MAX_CHAPTER_PLAN_SCENE_TITLE_CHARS),
+      trigger: clean(scene?.trigger, MAX_CHAPTER_PLAN_SCENE_FIELD_CHARS),
+      desire: clean(scene?.desire, MAX_CHAPTER_PLAN_SCENE_FIELD_CHARS),
+      obstacle: clean(scene?.obstacle, MAX_CHAPTER_PLAN_SCENE_FIELD_CHARS),
+      action: clean(scene?.action, MAX_CHAPTER_PLAN_SCENE_FIELD_CHARS),
+      turn: clean(scene?.turn, MAX_CHAPTER_PLAN_SCENE_FIELD_CHARS),
+      cost: clean(scene?.cost, MAX_CHAPTER_PLAN_SCENE_FIELD_CHARS),
+    })),
+  };
+  if ([
+    plan.goal, plan.obstacle, plan.choice, plan.payoff, plan.hook,
+    plan.tensionArc, plan.foreshadowing, plan.worldExpansion,
+    plan.decisionChain, plan.knowledgeDesign,
+  ]
+    .some((value) => !value)) return null;
+  if (plan.scenes.some((scene) => [
+    scene.trigger, scene.desire, scene.obstacle, scene.action, scene.turn, scene.cost,
+  ].some((value) => !value))) return null;
+  try {
+    const normalized = normalizeChapterPlan(plan);
+    return chapterPlanQualityDiagnostics(normalized).valid
+      && chapterPlanReadiness(normalized, { requireCurrentProtocol: true }).ready
+      ? normalized : null;
+  } catch {
+    return null;
+  }
+}
+
+export function extractChapterReview(text, options) {
+  const obj = extractFirstJsonObject(text);
+  if (!obj) return null;
+  return sanitizeChapterReview(obj, options);
+}
+
+export function extractGoldenThreeReview(text, options = {}) {
+  const obj = extractFirstJsonObject(text);
+  return obj ? normalizeGoldenThreeReview(obj, { truncate: true, ...options }) : null;
 }
 
 export function extractGeneratedTitles(text) {
@@ -613,7 +892,9 @@ export function extractWritingAssetAnalysis(text) {
   return sanitizeWritingAssetAnalysis(obj);
 }
 
-function markDigestParseState(digest, { digestParsed, charactersParsed, memoryCandidatesParsed }) {
+function markDigestParseState(digest, {
+  digestParsed, charactersParsed, memoryCandidatesParsed, handoffParsed,
+}) {
   // 解析失败、字段缺失和“明确识别到 0 个人物”在可序列化结果里都可能是
   // newCharacters: []。内部沿用该旧字段名以兼容已存测试/API；新提示词使用
   // 语义准确的 characters。非枚举标记把三种状态区分开。
@@ -621,6 +902,7 @@ function markDigestParseState(digest, { digestParsed, charactersParsed, memoryCa
     digestParsed: { value: digestParsed, enumerable: false },
     digestCharactersParsed: { value: charactersParsed, enumerable: false },
     digestMemoryCandidatesParsed: { value: memoryCandidatesParsed, enumerable: false },
+    digestHandoffParsed: { value: handoffParsed, enumerable: false },
   });
   return digest;
 }
@@ -628,7 +910,8 @@ function markDigestParseState(digest, { digestParsed, charactersParsed, memoryCa
 export function extractDigest(text) {
   const fallback = {
     chapterTitle: '', sectionTitle: '',
-    summary: '', progress: '', newCharacters: [], memoryCandidates: [],
+    summary: '', progress: '', handoff: emptyChapterHandoff(),
+    newCharacters: [], memoryCandidates: [],
   };
   const cleanText = (value, maxLength) => typeof value === 'string'
     ? Array.from(value.trim()).slice(0, maxLength).join('')
@@ -651,7 +934,8 @@ export function extractDigest(text) {
   const obj = extractFirstJsonObject(text);
   if (!obj) {
     return markDigestParseState(fallback, {
-      digestParsed: false, charactersParsed: false, memoryCandidatesParsed: false,
+      digestParsed: false, charactersParsed: false,
+      memoryCandidatesParsed: false, handoffParsed: false,
     });
   }
   // `characters` 是当前契约：它表示本章全部登场人物的最新快照，而非仅
@@ -660,16 +944,26 @@ export function extractDigest(text) {
   const rawCharacters = Array.isArray(obj.characters)
     ? obj.characters
     : obj.newCharacters;
+  let handoff = emptyChapterHandoff();
+  let handoffParsed = false;
+  if (obj.handoff !== undefined) {
+    try {
+      handoff = normalizeChapterHandoff(obj.handoff);
+      handoffParsed = true;
+    } catch { /* 上游局部字段失败不应丢掉合法摘要与人物快照 */ }
+  }
   return markDigestParseState({
     chapterTitle: sanitizeGeneratedTitle(obj.chapterTitle, '章'),
     sectionTitle: sanitizeGeneratedTitle(obj.sectionTitle, '部'),
     summary: cleanText(obj.summary, MAX_DIGEST_SUMMARY_CHARS),
     progress: cleanText(obj.progress, MAX_DIGEST_PROGRESS_CHARS),
+    handoff,
     newCharacters: cleanCharacters(rawCharacters),
     memoryCandidates: sanitizeMemoryCandidates(obj.memoryCandidates),
   }, {
     digestParsed: true,
     charactersParsed: Array.isArray(rawCharacters),
     memoryCandidatesParsed: Array.isArray(obj.memoryCandidates),
+    handoffParsed,
   });
 }

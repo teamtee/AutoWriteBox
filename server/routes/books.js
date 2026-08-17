@@ -3,10 +3,32 @@ import {
   buildSystemPrompt, buildContext, buildChapterReviewInstruction,
   buildStageSummaryInstruction, DIGEST_INSTRUCTION, STAGE_SUMMARY_SYSTEM_PROMPT,
 } from '../prompts.js';
-import { extractChapterReview, extractDigest } from '../llm.js';
+import { extractChapterReview, extractDigest, extractGoldenThreeReview } from '../llm.js';
+import {
+  buildGoldenThreeReviewInstruction, GOLDEN_THREE_REVIEW_SYSTEM_PROMPT,
+} from '../golden-three-review-prompt.js';
+import {
+  buildChapterRevisionInstruction, CHAPTER_REVISION_SYSTEM_APPENDIX,
+} from '../chapter-revision-prompt.js';
+import {
+  chapterRevisionImprovement, chapterRevisionStage, normalizeChapterRevisionCandidate,
+} from '../chapter-revision-schema.js';
+import {
+  buildChapterReviewRevisionInstruction, chapterReviewRevisionTargets,
+  chapterReviewRevision, CHAPTER_REVIEW_REVISION_SYSTEM_APPENDIX,
+} from '../chapter-review-revision-prompt.js';
 import { sendJsonError } from '../http-error.js';
 import { createClientAbortTracker } from '../client-abort.js';
 import { sendJsonStream } from '../http-json.js';
+import { worldBibleDiagnostics } from '../world-bible.js';
+import {
+  chapterPlanPromiseAlignment, chapterPromiseActionOptions,
+  promiseLedgerRevision,
+} from '../promise-ledger-schema.js';
+import { styleBibleDiagnostics } from '../style-bible.js';
+import { assertChapterOutputClean } from '../chapter-output-guard.js';
+import { worldProgressRevision } from '../world-progress-schema.js';
+import { buildChapterContextManifest } from '../chapter-context-manifest.js';
 
 const VERSION_REVISION_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
@@ -24,13 +46,21 @@ function versionedResponse(versioned) {
 
 function treeResponse(tree) {
   const core = tree.book.settings.core;
+  const {
+    promiseLedger: _promiseLedger, characterCraft: _characterCraft,
+    goldenThreeReview: _goldenThreeReview, worldProgressState: _worldProgressState,
+    ...publicSettings
+  } = tree.book.settings;
   return {
     ...tree,
     book: {
       ...tree.book,
       outline: versionedResponse(tree.book.outline),
       settings: {
-        ...tree.book.settings,
+        ...publicSettings,
+        storyEngine: store.storyEngineView(tree.book.settings.storyEngine),
+        worldBibleDiagnostics: worldBibleDiagnostics(store.currentText(core.world)),
+        styleBibleDiagnostics: styleBibleDiagnostics(store.currentText(core.style)),
         core: {
           world: versionedResponse(core.world),
           style: versionedResponse(core.style),
@@ -55,6 +85,11 @@ export function mountBookRoutes(app, deps = {}) {
   const sendJsonResponse = deps.sendJsonResponse ?? sendJsonStream;
   const readChapterReviewContext = deps.readChapterReviewContext
     ?? store.readChapterReviewContext;
+  const readConfigForTask = deps.readConfigForTask ?? store.readConfigForTask;
+  const saveChapterPlan = deps.saveChapterPlan ?? store.saveChapterPlan;
+  const readGoldenThreeReviewContext = deps.readGoldenThreeReviewContext
+    ?? store.readGoldenThreeReviewContext;
+  const saveGoldenThreeReview = deps.saveGoldenThreeReview ?? store.saveGoldenThreeReview;
   app.get('/api/books', async (req, res) => {
     const client = createClientAbortTracker(req, res);
     try {
@@ -105,6 +140,105 @@ export function mountBookRoutes(app, deps = {}) {
     }
   });
 
+  app.post('/api/books/:id/story-engine', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const result = await store.saveStoryEngine(req.params.id, req.body?.storyEngine, {
+        expectedRevision: req.body?.expectedRevision,
+        signal: client.signal,
+      });
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) res.json(result);
+    } catch (error) {
+      sendRouteError(res, error);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  app.get('/api/books/:id/promise-ledger', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const ledger = await store.readPromiseLedger(req.params.id, { signal: client.signal });
+      await client.assertAliveAfterIo();
+      await sendJsonResponse(res, ledger, { signal: client.signal });
+    } catch (error) {
+      sendRouteError(res, error);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  app.post('/api/books/:id/promise-ledger/entries', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const result = await store.savePromiseLedgerEntry(req.params.id, req.body?.entry, {
+        expectedRevision: req.body?.expectedRevision,
+        signal: client.signal,
+      });
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) res.json(result);
+    } catch (error) {
+      sendRouteError(res, error);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  app.delete('/api/books/:id/promise-ledger/entries/:eid', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const result = await store.deletePromiseLedgerEntry(req.params.id, req.params.eid, {
+        expectedRevision: req.body?.expectedRevision,
+        signal: client.signal,
+      });
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) res.json(result);
+    } catch (error) {
+      sendRouteError(res, error);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  app.get('/api/books/:id/character-craft', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const craft = await store.readCharacterCraft(req.params.id, { signal: client.signal });
+      await client.assertAliveAfterIo();
+      await sendJsonResponse(res, craft, { signal: client.signal });
+    } catch (error) { sendRouteError(res, error); }
+    finally { client.dispose(); }
+  });
+
+  const saveCharacterCraft = (save) => async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const result = await save(req.params.id, req.body?.entry, {
+        expectedRevision: req.body?.expectedRevision, signal: client.signal,
+      });
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) res.json(result);
+    } catch (error) { sendRouteError(res, error); }
+    finally { client.dispose(); }
+  };
+  app.post('/api/books/:id/character-craft/characters',
+    saveCharacterCraft(store.saveCharacterGuide));
+  app.post('/api/books/:id/character-craft/relationships',
+    saveCharacterCraft(store.saveRelationshipGuide));
+  app.delete('/api/books/:id/character-craft/entries/:eid', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const result = await store.deleteCharacterCraftEntry(
+        req.params.id, req.params.eid,
+        { expectedRevision: req.body?.expectedRevision, signal: client.signal },
+      );
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) res.json(result);
+    } catch (error) { sendRouteError(res, error); }
+    finally { client.dispose(); }
+  });
+
   app.post('/api/books/:id/platform-confirmations', async (req, res) => {
     const client = createClientAbortTracker(req, res);
     try {
@@ -144,18 +278,78 @@ export function mountBookRoutes(app, deps = {}) {
         req.params.id, req.params.sid, req.params.cid, { signal: client.signal },
       );
       await client.assertAliveAfterIo();
+      const [goldenThree, chapterConfig] = await Promise.all([
+        snapshot.bookChapterIndex === 3
+          ? readGoldenThreeReviewContext(req.params.id, { signal: client.signal })
+          : null,
+        readConfigForTask('chapter', {
+          signal: client.signal, bookId: req.params.id,
+        }),
+      ]);
+      await client.assertAliveAfterIo();
+      const contextManifest = buildChapterContextManifest({
+        book: snapshot.book, section: snapshot.section, chapter: snapshot.chapter,
+        previousChapter: snapshot.previousChapter,
+        bookChapterIndex: snapshot.bookChapterIndex,
+        recentReviewSignals: snapshot.recentReviewSignals,
+        writingAssetContext: snapshot.writingAssetContext,
+        modelContextChars: chapterConfig.modelContextChars,
+      });
       await sendJsonResponse(res, {
         ...snapshot.chapter,
         body: versionedResponse(snapshot.chapter.body),
+        plan: store.chapterPlanView(snapshot.chapter.plan, {
+          promiseAlignment: chapterPlanPromiseAlignment(
+            snapshot.book?.settings?.promiseLedger,
+            { bookChapterIndex: snapshot.bookChapterIndex, plan: snapshot.chapter.plan },
+          ),
+          sectionOutline: snapshot.section?.outline?.content,
+          recentReviewSignals: snapshot.recentReviewSignals,
+          bookChapterIndex: snapshot.bookChapterIndex,
+          requireCurrentProtocol: !store.currentText(snapshot.chapter.body).trim(),
+        }),
         published: store.chapterPublicationView(snapshot.chapter),
         reviewContextRevision: snapshot.contextRevision,
+        reviewRevision: snapshot.chapter.review
+          ? chapterReviewRevision(snapshot.chapter.review) : undefined,
+        contextManifest,
+        incomingPlanCarryover: snapshot.incomingPlanCarryover,
+        promiseActions: chapterPromiseActionOptions(
+          snapshot.book?.settings?.promiseLedger,
+          { bookChapterIndex: snapshot.bookChapterIndex },
+        ),
+        promiseLedgerRevision: promiseLedgerRevision(
+          snapshot.book?.settings?.promiseLedger,
+        ),
+        worldProgressRevision: worldProgressRevision(
+          snapshot.book?.settings?.worldProgressState,
+        ),
         memoryCandidates: store.chapterMemoryCandidatesView(
           snapshot.book, snapshot.chapter,
         ),
         memoryRevision: store.bookMemoryRevision(snapshot.book),
+        ...(goldenThree ? {
+          goldenThreeReviewState: store.goldenThreeReviewState(goldenThree),
+        } : {}),
       }, { signal: client.signal });
     } catch (e) {
       sendRouteError(res, e);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  app.post('/api/books/:id/sections/:sid/chapters/:cid/plan', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const result = await saveChapterPlan(
+        req.params.id, req.params.sid, req.params.cid, req.body?.plan,
+        { expectedRevision: req.body?.expectedRevision, signal: client.signal },
+      );
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) res.json(result);
+    } catch (error) {
+      sendRouteError(res, error);
     } finally {
       client.dispose();
     }
@@ -336,6 +530,7 @@ export function mountBookRoutes(app, deps = {}) {
       const complete = digest
         && digest.digestParsed !== false
         && digest.digestCharactersParsed !== false
+        && digest.digestHandoffParsed !== false
         && typeof digest.summary === 'string' && Boolean(digest.summary.trim())
         && typeof digest.progress === 'string' && Boolean(digest.progress.trim());
       if (!complete) throw new Error('MEMORY_RECOMPUTE_FAILED');
@@ -474,6 +669,294 @@ export function mountBookRoutes(app, deps = {}) {
   });
 
   // ——— 手动审稿 ———
+  app.post('/api/books/:bookId/sections/:sid/chapters/:cid/revision-candidate', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const { bookId, sid, cid } = req.params;
+      const stage = chapterRevisionStage(req.body?.stage);
+      const expectedBodyFingerprint = req.body?.expectedBodyFingerprint;
+      const expectedContextRevision = req.body?.expectedContextRevision;
+      if (!stage) throw new Error('BAD_CHAPTER_REVISION_STAGE');
+      if (typeof expectedBodyFingerprint !== 'string'
+        || !VERSION_REVISION_PATTERN.test(expectedBodyFingerprint)
+        || typeof expectedContextRevision !== 'string'
+        || !VERSION_REVISION_PATTERN.test(expectedContextRevision)) {
+        throw new Error('BAD_CHAPTER_REVISION_ANCHOR');
+      }
+      const snapshot = await readChapterReviewContext(
+        bookId, sid, cid, { signal: client.signal },
+      );
+      if (snapshot.chapter.bodyFingerprint !== expectedBodyFingerprint
+        || snapshot.contextRevision !== expectedContextRevision) {
+        throw new Error('CHAPTER_REVISION_CANDIDATE_STALE');
+      }
+      const content = store.currentText(snapshot.chapter.body);
+      if (!content.trim()) throw new Error('CHAPTER_EMPTY');
+      if (typeof nonStreamChat !== 'function') throw new Error('INTERNAL_ERROR');
+      const config = await store.readConfigForTask('chapter', {
+        signal: client.signal, bookId,
+      });
+      const system = buildSystemPrompt(
+        snapshot.book.settings?.core, snapshot.writingAssetContext?.text ?? '',
+        snapshot.book.settings?.storyEngine,
+      ) + CHAPTER_REVISION_SYSTEM_APPENDIX;
+      const context = buildContext({
+        book: snapshot.book, section: snapshot.section,
+        prevChapter: snapshot.previousChapter,
+        bookChapterIndex: snapshot.bookChapterIndex,
+        chapterPlan: snapshot.chapter.plan, currentContent: content,
+      });
+      const raw = await nonStreamChat({
+        config, system, messages: [{
+          role: 'user', content: buildChapterRevisionInstruction({
+            stageId: stage.id, chapterIndex: snapshot.chapter.index,
+            bookChapterIndex: snapshot.bookChapterIndex, context, content,
+          }),
+        }], signal: client.signal,
+      });
+      await client.assertAliveAfterIo();
+      const candidate = normalizeChapterRevisionCandidate(raw, content);
+      if (!candidate) throw new Error('CHAPTER_REVISION_CANDIDATE_FAILED');
+      assertChapterOutputClean(candidate);
+      const improvement = chapterRevisionImprovement(candidate, content, {
+        stageId: stage.id,
+      });
+      if (!improvement?.valid) throw new Error('CHAPTER_REVISION_NOT_IMPROVED');
+      const latest = await readChapterReviewContext(
+        bookId, sid, cid, { signal: client.signal },
+      );
+      if (latest.chapter.bodyFingerprint !== expectedBodyFingerprint
+        || latest.contextRevision !== expectedContextRevision) {
+        throw new Error('CHAPTER_REVISION_CANDIDATE_STALE');
+      }
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) res.json({
+        stage: stage.id, candidate,
+        changed: candidate !== content.trim(), improvement,
+        sourceBodyFingerprint: expectedBodyFingerprint,
+        sourceContextRevision: expectedContextRevision,
+      });
+    } catch (error) { sendRouteError(res, error); }
+    finally { client.dispose(); }
+  });
+
+  app.post('/api/books/:bookId/sections/:sid/chapters/:cid/review-revision-candidate', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const { bookId, sid, cid } = req.params;
+      const expectedBodyFingerprint = req.body?.expectedBodyFingerprint;
+      const expectedContextRevision = req.body?.expectedContextRevision;
+      const expectedReviewRevision = req.body?.expectedReviewRevision;
+      if (typeof expectedBodyFingerprint !== 'string'
+        || !VERSION_REVISION_PATTERN.test(expectedBodyFingerprint)
+        || typeof expectedContextRevision !== 'string'
+        || !VERSION_REVISION_PATTERN.test(expectedContextRevision)
+        || typeof expectedReviewRevision !== 'string'
+        || !VERSION_REVISION_PATTERN.test(expectedReviewRevision)) {
+        throw new Error('BAD_CHAPTER_REVIEW_REVISION_ANCHOR');
+      }
+      const snapshot = await readChapterReviewContext(
+        bookId, sid, cid, { signal: client.signal },
+      );
+      const review = snapshot.chapter.review;
+      if (snapshot.chapter.bodyFingerprint !== expectedBodyFingerprint
+        || snapshot.contextRevision !== expectedContextRevision
+        || review?.sourceFingerprint !== expectedBodyFingerprint
+        || review?.sourceContextRevision !== expectedContextRevision
+        || chapterReviewRevision(review) !== expectedReviewRevision) {
+        throw new Error('CHAPTER_REVIEW_REVISION_CANDIDATE_STALE');
+      }
+      if (!chapterReviewRevisionTargets(review)) {
+        throw new Error('CHAPTER_REVIEW_HAS_NO_REVISIONS');
+      }
+      const content = store.currentText(snapshot.chapter.body);
+      if (!content.trim()) throw new Error('CHAPTER_EMPTY');
+      if (typeof nonStreamChat !== 'function') throw new Error('INTERNAL_ERROR');
+      const config = await store.readConfigForTask('chapter', {
+        signal: client.signal, bookId,
+      });
+      const system = buildSystemPrompt(
+        snapshot.book.settings?.core, snapshot.writingAssetContext?.text ?? '',
+        snapshot.book.settings?.storyEngine,
+      ) + CHAPTER_REVIEW_REVISION_SYSTEM_APPENDIX;
+      const context = buildContext({
+        book: snapshot.book, section: snapshot.section,
+        prevChapter: snapshot.previousChapter,
+        bookChapterIndex: snapshot.bookChapterIndex,
+        chapterPlan: snapshot.chapter.plan, currentContent: content,
+      });
+      const raw = await nonStreamChat({
+        config, system, messages: [{
+          role: 'user', content: buildChapterReviewRevisionInstruction({
+            chapterIndex: snapshot.chapter.index,
+            bookChapterIndex: snapshot.bookChapterIndex,
+            context, content, review, chapterPlan: snapshot.chapter.plan,
+          }),
+        }], signal: client.signal,
+      });
+      await client.assertAliveAfterIo();
+      const candidate = normalizeChapterRevisionCandidate(raw, content);
+      if (!candidate) throw new Error('CHAPTER_REVIEW_REVISION_CANDIDATE_FAILED');
+      assertChapterOutputClean(candidate);
+      const improvement = chapterRevisionImprovement(candidate, content, { review });
+      if (!improvement?.valid) throw new Error('CHAPTER_REVIEW_REVISION_NOT_IMPROVED');
+      const latest = await readChapterReviewContext(
+        bookId, sid, cid, { signal: client.signal },
+      );
+      if (latest.chapter.bodyFingerprint !== expectedBodyFingerprint
+        || latest.contextRevision !== expectedContextRevision
+        || chapterReviewRevision(latest.chapter.review) !== expectedReviewRevision) {
+        throw new Error('CHAPTER_REVIEW_REVISION_CANDIDATE_STALE');
+      }
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) res.json({
+        candidate, changed: candidate !== content.trim(), improvement,
+        sourceBodyFingerprint: expectedBodyFingerprint,
+        sourceContextRevision: expectedContextRevision,
+        sourceReviewRevision: expectedReviewRevision,
+        candidateFingerprint: store.contentFingerprint(candidate),
+      });
+    } catch (error) { sendRouteError(res, error); }
+    finally { client.dispose(); }
+  });
+
+  app.post('/api/books/:bookId/sections/:sid/chapters/:cid/review-revision-candidate/verify', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const { bookId, sid, cid } = req.params;
+      const candidate = req.body?.candidate;
+      const expectedBodyFingerprint = req.body?.expectedBodyFingerprint;
+      const expectedContextRevision = req.body?.expectedContextRevision;
+      const expectedReviewRevision = req.body?.expectedReviewRevision;
+      if (typeof candidate !== 'string' || !candidate.trim()) throw new Error('BAD_TEXT');
+      if (candidate.length > 200_000) throw new Error('TEXT_TOO_LARGE');
+      if (typeof expectedBodyFingerprint !== 'string'
+        || !VERSION_REVISION_PATTERN.test(expectedBodyFingerprint)
+        || typeof expectedContextRevision !== 'string'
+        || !VERSION_REVISION_PATTERN.test(expectedContextRevision)
+        || typeof expectedReviewRevision !== 'string'
+        || !VERSION_REVISION_PATTERN.test(expectedReviewRevision)) {
+        throw new Error('BAD_CHAPTER_REVIEW_REVISION_ANCHOR');
+      }
+      const snapshot = await readChapterReviewContext(
+        bookId, sid, cid, { signal: client.signal },
+      );
+      const sourceContent = store.currentText(snapshot.chapter.body);
+      const sourceReview = snapshot.chapter.review;
+      if (snapshot.chapter.bodyFingerprint !== expectedBodyFingerprint
+        || snapshot.contextRevision !== expectedContextRevision
+        || chapterReviewRevision(sourceReview) !== expectedReviewRevision) {
+        throw new Error('CHAPTER_REVIEW_REVISION_CANDIDATE_STALE');
+      }
+      const improvement = chapterRevisionImprovement(candidate.trim(), sourceContent, {
+        review: sourceReview,
+      });
+      if (!improvement?.valid) throw new Error('CHAPTER_REVIEW_REVISION_NOT_IMPROVED');
+      assertChapterOutputClean(candidate);
+      const config = await store.readConfigForTask('review', {
+        signal: client.signal, bookId,
+      });
+      const system = buildSystemPrompt(
+        snapshot.book.settings?.core, snapshot.writingAssetContext?.text ?? '',
+        snapshot.book.settings?.storyEngine,
+      );
+      const context = buildContext({
+        book: snapshot.book, section: snapshot.section,
+        prevChapter: snapshot.previousChapter,
+        bookChapterIndex: snapshot.bookChapterIndex,
+        chapterPlan: snapshot.chapter.plan, currentContent: candidate.trim(),
+      });
+      const raw = await nonStreamChat({
+        config, system, messages: [{ role: 'user', content: buildChapterReviewInstruction({
+          chapterIndex: snapshot.chapter.index,
+          bookChapterIndex: snapshot.bookChapterIndex,
+          content: candidate.trim(), context,
+          recentReviewSignals: snapshot.recentReviewSignals,
+          chapterPlan: snapshot.chapter.plan,
+          sectionOutline: snapshot.section.outline?.content,
+        }) }], signal: client.signal,
+      });
+      await client.assertAliveAfterIo();
+      const verificationReview = extractChapterReview(raw, {
+        chapterPlan: snapshot.chapter.plan,
+        promiseLedger: snapshot.book.settings?.promiseLedger,
+        chapterContent: candidate.trim(),
+        sectionOutline: snapshot.section.outline?.content,
+      });
+      if (!verificationReview) throw new Error('CHAPTER_REVIEW_REVISION_VERIFY_FAILED');
+      const latest = await readChapterReviewContext(
+        bookId, sid, cid, { signal: client.signal },
+      );
+      if (latest.chapter.bodyFingerprint !== expectedBodyFingerprint
+        || latest.contextRevision !== expectedContextRevision
+        || chapterReviewRevision(latest.chapter.review) !== expectedReviewRevision) {
+        throw new Error('CHAPTER_REVIEW_REVISION_CANDIDATE_STALE');
+      }
+      const remainingRiskCount = verificationReview.webFictionChecks?.filter(
+        (item) => item.status === 'risk' && item.id !== 'contentRisk',
+      ).length ?? 0;
+      const remainingPlanRiskCount = verificationReview.planComparison?.items.filter(
+        (item) => item.outcome === 'missed' || item.outcome === 'unclear',
+      ).length ?? 0;
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) res.json({
+        review: verificationReview,
+        verified: remainingRiskCount === 0 && remainingPlanRiskCount === 0,
+        remainingRiskCount, remainingPlanRiskCount,
+        candidateFingerprint: store.contentFingerprint(candidate.trim()),
+        sourceBodyFingerprint: expectedBodyFingerprint,
+        sourceContextRevision: expectedContextRevision,
+        sourceReviewRevision: expectedReviewRevision,
+      });
+    } catch (error) { sendRouteError(res, error); }
+    finally { client.dispose(); }
+  });
+
+  app.post('/api/books/:bookId/golden-three-review', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const expectedContextRevision = req.body?.expectedContextRevision;
+      if (typeof expectedContextRevision !== 'string'
+        || !VERSION_REVISION_PATTERN.test(expectedContextRevision)) {
+        throw new Error('BAD_GOLDEN_THREE_ANCHOR');
+      }
+      const context = await readGoldenThreeReviewContext(
+        req.params.bookId, { signal: client.signal },
+      );
+      if (!context.ready) throw new Error('GOLDEN_THREE_INCOMPLETE');
+      if (context.contextRevision !== expectedContextRevision) {
+        throw new Error('GOLDEN_THREE_STALE');
+      }
+      if (typeof nonStreamChat !== 'function') throw new Error('INTERNAL_ERROR');
+      const config = await store.readConfigForTask('review', {
+        signal: client.signal, bookId: req.params.bookId,
+      });
+      const raw = await nonStreamChat({
+        config, system: GOLDEN_THREE_REVIEW_SYSTEM_PROMPT,
+        messages: [{
+          role: 'user', content: buildGoldenThreeReviewInstruction(context.promptContext),
+        }],
+        signal: client.signal,
+      });
+      await client.assertAliveAfterIo();
+      const review = extractGoldenThreeReview(raw, {
+        chapterContents: context.promptContext.chapters.map((chapter) => chapter.content),
+        requireEvidenceQuotes: true,
+      });
+      if (!review) throw new Error('GOLDEN_THREE_REVIEW_FAILED');
+      const saved = await saveGoldenThreeReview(req.params.bookId, review, {
+        expectedContextRevision, signal: client.signal,
+      });
+      if (!saved.applied) {
+        const error = saved.reason === 'incomplete'
+          ? 'GOLDEN_THREE_INCOMPLETE' : 'GOLDEN_THREE_STALE';
+        return res.status(409).json({ error });
+      }
+      if (!res.destroyed && !res.writableEnded) res.json(saved.review);
+    } catch (error) { sendRouteError(res, error); }
+    finally { client.dispose(); }
+  });
+
   app.post('/api/books/:bookId/sections/:sid/chapters/:cid/review', async (req, res) => {
     const client = createClientAbortTracker(req, res);
     try {
@@ -491,7 +974,7 @@ export function mountBookRoutes(app, deps = {}) {
       );
       const {
         book, section, chapter, bookChapterIndex, recentReviewSignals,
-        writingAssetContext, contextRevision,
+        previousChapter, writingAssetContext, contextRevision,
       } = reviewContext;
       if (chapter.bodyFingerprint !== expectedBodyFingerprint) {
         throw new Error('REVIEW_STALE');
@@ -504,18 +987,29 @@ export function mountBookRoutes(app, deps = {}) {
       const config = await store.readConfigForTask('review', {
         signal: client.signal, bookId,
       });
-      const system = buildSystemPrompt(book.settings?.core, writingAssetContext?.text ?? '');
-      const context = buildContext({ book, section });
+      const system = buildSystemPrompt(
+        book.settings?.core, writingAssetContext?.text ?? '', book.settings?.storyEngine,
+      );
+      const context = buildContext({
+        book, section, prevChapter: previousChapter, bookChapterIndex,
+        chapterPlan: chapter.plan, currentContent: content,
+      });
       const instruction = buildChapterReviewInstruction({
         chapterIndex: chapter.index, bookChapterIndex, content, context,
-        recentReviewSignals,
+        recentReviewSignals, chapterPlan: chapter.plan,
+        sectionOutline: section.outline?.content,
       });
       const raw = await nonStreamChat({
         config, system, messages: [{ role: 'user', content: instruction }],
         signal: client.signal,
       });
       await client.assertAliveAfterIo();
-      const review = extractChapterReview(raw);
+      const review = extractChapterReview(raw, {
+        chapterPlan: chapter.plan,
+        promiseLedger: book.settings?.promiseLedger,
+        chapterContent: content,
+        sectionOutline: section.outline?.content,
+      });
       if (!review) throw new Error('REVIEW_FAILED');
       const saved = await store.saveChapterReview(bookId, sid, cid, review, {
         expectedBodyFingerprint: chapter.bodyFingerprint,
@@ -530,6 +1024,48 @@ export function mountBookRoutes(app, deps = {}) {
     } catch (e) {
       if (res.destroyed || res.writableEnded) return;
       sendJsonError(res, e);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  app.post('/api/books/:bookId/sections/:sid/chapters/:cid/review-promise-candidates/:entryId/apply', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const result = await store.applyChapterReviewPromiseCandidate(
+        req.params.bookId, req.params.sid, req.params.cid, req.params.entryId,
+        {
+          expectedBodyFingerprint: req.body?.expectedBodyFingerprint,
+          expectedReviewRevision: req.body?.expectedReviewRevision,
+          expectedPromiseLedgerRevision: req.body?.expectedPromiseLedgerRevision,
+          signal: client.signal,
+        },
+      );
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) res.json(result);
+    } catch (error) {
+      sendRouteError(res, error);
+    } finally {
+      client.dispose();
+    }
+  });
+
+  app.post('/api/books/:bookId/sections/:sid/chapters/:cid/review-world-gate-candidate/apply', async (req, res) => {
+    const client = createClientAbortTracker(req, res);
+    try {
+      const result = await store.applyChapterReviewWorldGateCandidate(
+        req.params.bookId, req.params.sid, req.params.cid,
+        {
+          expectedBodyFingerprint: req.body?.expectedBodyFingerprint,
+          expectedReviewRevision: req.body?.expectedReviewRevision,
+          expectedWorldProgressRevision: req.body?.expectedWorldProgressRevision,
+          signal: client.signal,
+        },
+      );
+      await client.assertAliveAfterIo();
+      if (!res.destroyed && !res.writableEnded) res.json(result);
+    } catch (error) {
+      sendRouteError(res, error);
     } finally {
       client.dispose();
     }

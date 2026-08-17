@@ -238,11 +238,14 @@ test('单书主辅与章节场景绑定只把抽象卡片送入上下文，删�
   const context = await store.readWritingAssetContext(bookId, chapterId);
   assert.equal(context.scene, 'dialogue');
   assert.deepEqual(context.assetIds, [created.asset.id]);
+  assert.match(context.revision, /^[A-Za-z0-9_-]{43}$/);
   assert.match(context.text, /贴近主角的第三人称有限视角/);
   assert.match(context.text, /让线索同时带来机会与风险/);
   assert.doesNotMatch(context.text, /不可发送的资产名称/);
   assert.doesNotMatch(context.text, /不可发送的作品与作者信息/);
   assert.doesNotMatch(context.text, /private-source/);
+  const stableContext = await store.readWritingAssetContext(bookId, chapterId);
+  assert.equal(stableContext.revision, context.revision);
 
   const generationSnapshot = await store.readChapterGenerationContext(
     bookId, section.id, chapterId,
@@ -266,6 +269,7 @@ test('单书主辅与章节场景绑定只把抽象卡片送入上下文，删�
   assert.equal(afterDelete.bookBindings[bookId].primaryAssetId, null);
   assert.deepEqual(afterDelete.bookBindings[bookId].sceneAssetIds, {});
   assert.equal((await store.readWritingAssetContext(bookId, chapterId)).text, '');
+  assert.equal((await store.readWritingAssetContext(bookId, chapterId)).revision, '');
 });
 
 test('本书原生文风只能从已发布正文提取并以更高优先级绑定', async () => {

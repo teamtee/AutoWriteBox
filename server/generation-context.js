@@ -6,37 +6,18 @@ import {
   MAX_SECTION_OUTLINE_PROMPT_CHARS, MAX_SECTION_PROMPT_SUMMARY_CHARS,
 } from './limits.js';
 import { stageSummaryIsStale } from './stage-summary-schema.js';
+import { formatChapterHandoff } from './chapter-handoff-schema.js';
+import {
+  generationMemoryRelevantTerms, generationMemoryRows, generationMemorySelection,
+} from './generation-memory-context.js';
+
+export { generationMemoryRows, generationMemorySelection } from './generation-memory-context.js';
 
 const OMITTED_SECTION_SUMMARY_PREFIX = '（较早的本部摘要已省略，以下为最近剧情）\n';
 const OMITTED_BOOK_SUMMARY_ROW = '（更早分部剧情已因上下文预算省略）';
-const OMITTED_BOOK_SECTION_PREFIX = '（本部较早剧情已省略）\n';
+const OMITTED_BOOK_SECTION_PREFIX = '（本部中间剧情已省略，保留开场、相关条目与收尾）\n';
 const OMITTED_CHARACTERS_ROW = '- …已省略中间人物，保留主要与最近条目…';
 const OMITTED_TEXT_MARKER = '\n（中间内容已省略，保留开头与结尾）\n';
-const OMITTED_MEMORY_ROW = '- …其它已确认记忆因上下文预算省略…';
-const MEMORY_DETAIL_LABELS = Object.freeze({
-  target: '关系另一方', relationType: '关系类型', strength: '关系强度',
-  visibility: '公开程度', changeReason: '变化原因', eventType: '事件',
-  owner: '持有人', origin: '来源', quantity: '数量', status: '状态',
-  lastLocation: '最后位置', cost: '代价', limitation: '限制', from: '起点',
-  to: '终点', time: '时间', order: '先后', duration: '持续',
-  participants: '参与者', location: '地点',
-  role: '职位', alignment: '阵营', goal: '目标', relations: '对外关系',
-  territory: '控制区域', foreshadowStatus: '伏笔状态', readerKnowledge: '读者已知',
-  plannedPayoff: '计划回收', actualPayoff: '实际回收', dueChapter: '截止章',
-  knowledgeOwner: '知情范围', knower: '知情人物', information: '已知信息',
-  learnedAt: '获知时间',
-});
-
-function generationMemoryDetailParts(details) {
-  if (!details || typeof details !== 'object' || Array.isArray(details)) return [];
-  return Object.entries(MEMORY_DETAIL_LABELS).flatMap(([field, label]) => {
-    const raw = details[field];
-    const value = Array.isArray(raw)
-      ? raw.filter((item) => typeof item === 'string').join('、')
-      : typeof raw === 'string' ? raw : '';
-    return value ? [`${label}=${value}`] : [];
-  });
-}
 
 export function generationTextWindow(value, maxChars) {
   if (typeof value !== 'string' || !value) return '';
@@ -49,18 +30,45 @@ export function generationTextWindow(value, maxChars) {
   return value.slice(0, headLength) + OMITTED_TEXT_MARKER + value.slice(-tailLength);
 }
 
-export const generationCoreFieldText = (value) =>
-  generationTextWindow(value, MAX_CORE_PROMPT_FIELD_CHARS);
+// 可选 maxChars 由分层预算分配器传入（context-budget.js）。缺省时回退到
+// limits.js 的字段上限，旧调用方行为不变。
+const windowLimit = (maxChars, fallback) => {
+  if (maxChars === 0) return 0;
+  return Number.isSafeInteger(maxChars) && maxChars > 0
+    ? Math.min(maxChars, fallback) : fallback;
+};
 
-export const generationBookOutlineText = (value) =>
-  generationTextWindow(value, MAX_BOOK_OUTLINE_PROMPT_CHARS);
+const budgetedWindow = (value, maxChars, fallback) => {
+  const limit = windowLimit(maxChars, fallback);
+  return limit === 0 ? '' : generationTextWindow(value, limit);
+};
 
-export const generationSectionOutlineText = (value) =>
-  generationTextWindow(value, MAX_SECTION_OUTLINE_PROMPT_CHARS);
+export const generationCoreFieldText = (value, maxChars) =>
+  budgetedWindow(value, maxChars, MAX_CORE_PROMPT_FIELD_CHARS);
 
-export function previousChapterEndingText(value) {
+export const generationBookOutlineText = (value, maxChars) =>
+  budgetedWindow(value, maxChars, MAX_BOOK_OUTLINE_PROMPT_CHARS);
+
+export const generationSectionOutlineText = (value, maxChars) =>
+  budgetedWindow(value, maxChars, MAX_SECTION_OUTLINE_PROMPT_CHARS);
+
+export function generationChapterContent(chapter) {
+  if (!chapter || typeof chapter !== 'object') return '';
+  if (Array.isArray(chapter.body?.versions)) {
+    return typeof chapter.body.versions[chapter.body.cursor] === 'string'
+      ? chapter.body.versions[chapter.body.cursor] : '';
+  }
+  return typeof chapter.content === 'string' ? chapter.content : '';
+}
+
+export function previousChapterEndingText(value, maxChars) {
   if (typeof value !== 'string') return '';
-  return value.slice(-MAX_PREVIOUS_CHAPTER_ENDING_PROMPT_CHARS);
+  const limit = windowLimit(maxChars, MAX_PREVIOUS_CHAPTER_ENDING_PROMPT_CHARS);
+  return limit === 0 ? '' : value.slice(-limit);
+}
+
+export function previousChapterHandoffText(value) {
+  return formatChapterHandoff(value);
 }
 
 function joinedRowsLength(rows) {
@@ -106,11 +114,13 @@ export function generationCharacterRows(
   return [...head, OMITTED_CHARACTERS_ROW, ...reversedTail.reverse()];
 }
 
-export function recentSectionSummary(value) {
+export function recentSectionSummary(value, maxChars) {
   if (typeof value !== 'string' || !value) return '';
-  if (value.length <= MAX_SECTION_PROMPT_SUMMARY_CHARS) return value;
+  const limit = windowLimit(maxChars, MAX_SECTION_PROMPT_SUMMARY_CHARS);
+  if (limit === 0) return '';
+  if (value.length <= limit) return value;
   const tailBudget = Math.max(
-    0, MAX_SECTION_PROMPT_SUMMARY_CHARS - OMITTED_SECTION_SUMMARY_PREFIX.length,
+    0, limit - OMITTED_SECTION_SUMMARY_PREFIX.length,
   );
   let tail = value.slice(-tailBudget);
   // 聚合摘要通常一章一行。窗口若从行中间开始，优先丢弃这半行，避免
@@ -123,20 +133,54 @@ export function recentSectionSummary(value) {
 }
 
 export function bookSectionSummaryWindow(
-  value, maxChars = MAX_BOOK_SECTION_SUMMARY_CHARS,
+  value, maxChars = MAX_BOOK_SECTION_SUMMARY_CHARS, relevantTerms = [],
 ) {
   if (typeof value !== 'string' || !value) return '';
   const limit = Number.isSafeInteger(maxChars) && maxChars > 0
     ? maxChars : MAX_BOOK_SECTION_SUMMARY_CHARS;
   if (value.length <= limit) return value;
-  const tailLength = Math.max(0, limit - OMITTED_BOOK_SECTION_PREFIX.length);
-  let tail = value.slice(-tailLength);
-  const lineBreak = tail.indexOf('\n');
-  if (lineBreak >= 0 && lineBreak < tail.length - 1) tail = tail.slice(lineBreak + 1);
-  return (OMITTED_BOOK_SECTION_PREFIX + tail).slice(0, limit);
+  const lines = value.split('\n').filter(Boolean);
+  // 人工导入的单行长摘要没有章节边界，退化为首尾窗口，仍保住阶段起点。
+  if (lines.length <= 1) return generationTextWindow(value, limit);
+
+  const marker = `（本部有 ${lines.length} 条章节摘要因预算省略；保留开场、相关条目与收尾）`;
+  const markerBudget = Math.min(limit, marker.length + 1);
+  const available = Math.max(0, limit - markerBudget);
+  const selected = new Set();
+  let used = 0;
+  const add = (index, quota = available) => {
+    if (selected.has(index)) return false;
+    const cost = lines[index].length + (selected.size ? 1 : 0);
+    if (used + cost > Math.min(available, quota)) return false;
+    selected.add(index);
+    used += cost;
+    return true;
+  };
+
+  // 先保留开场，再保留本章直接相关的旧条目，最后把剩余额度给收尾。
+  const headQuota = Math.floor(available * 0.25);
+  for (let index = 0; index < lines.length && add(index, headQuota); index += 1) {}
+  const terms = relevantTerms.filter((term) =>
+    typeof term === 'string' && term.length >= 2 && term.length <= 80);
+  const relevantQuota = Math.floor(available * 0.60);
+  for (let index = 0; index < lines.length; index += 1) {
+    if (terms.some((term) => lines[index].includes(term))) add(index, relevantQuota);
+  }
+  for (let index = lines.length - 1; index >= 0; index -= 1) add(index);
+
+  const indexes = [...selected].sort((left, right) => left - right);
+  const omitted = lines.length - indexes.length;
+  if (omitted <= 0) return indexes.map((index) => lines[index]).join('\n').slice(0, limit);
+  const firstTail = indexes.findIndex((index, position) => position > 0
+    && index > indexes[position - 1] + 1);
+  const split = firstTail < 0 ? Math.min(1, indexes.length) : firstTail;
+  const before = indexes.slice(0, split).map((index) => lines[index]);
+  const after = indexes.slice(split).map((index) => lines[index]);
+  const omissionMarker = `（本部有 ${omitted} 条章节摘要因预算省略；保留开场、相关条目与收尾）`;
+  return [...before, omissionMarker, ...after].join('\n').slice(0, limit);
 }
 
-function bookSummaryRows(book, beforeSectionId) {
+function bookSummaryRows(book, beforeSectionId, relevantTerms = []) {
   if (!book || !Array.isArray(book.sections)
     || !book.sectionSummaries || typeof book.sectionSummaries !== 'object') return [];
   const beforeIndex = beforeSectionId === undefined
@@ -147,11 +191,13 @@ function bookSummaryRows(book, beforeSectionId) {
     if (!item || typeof item.summary !== 'string' || !item.summary) return [];
     const title = typeof item.title === 'string' && item.title
       ? ` · ${item.title}` : '';
-    return [`第${position + 1}部${title}：\n${bookSectionSummaryWindow(item.summary)}`];
+    return [`第${position + 1}部${title}：\n${bookSectionSummaryWindow(
+      item.summary, MAX_BOOK_SECTION_SUMMARY_CHARS, relevantTerms,
+    )}`];
   });
 }
 
-function stageAwareBookSummaryRows(book, beforeSectionId) {
+function stageAwareBookSummaryRows(book, beforeSectionId, relevantTerms = []) {
   const sections = Array.isArray(book?.sections) ? book.sections : [];
   const beforeIndex = beforeSectionId === undefined
     ? sections.length : sections.indexOf(beforeSectionId);
@@ -160,10 +206,11 @@ function stageAwareBookSummaryRows(book, beforeSectionId) {
     .flatMap((item) => {
       const startIndex = sections.indexOf(item?.startSectionId);
       const endIndex = sections.indexOf(item?.endSectionId);
+      const stale = stageSummaryIsStale(book, item);
       if (startIndex < 0 || endIndex < startIndex || endIndex >= end
         || typeof item?.summary !== 'string' || !item.summary
-        || (item.status !== 'frozen' && stageSummaryIsStale(book, item))) return [];
-      return [{ item, startIndex, endIndex }];
+        || (item.status !== 'frozen' && stale)) return [];
+      return [{ item, startIndex, endIndex, stale }];
     })
     .sort((left, right) => left.startIndex - right.startIndex
       || right.endIndex - left.endIndex
@@ -175,10 +222,15 @@ function stageAwareBookSummaryRows(book, beforeSectionId) {
     selected.push(candidate);
     coveredThrough = candidate.endIndex;
   }
-  if (!selected.length) return bookSummaryRows(book, beforeSectionId);
+  if (!selected.length) return bookSummaryRows(book, beforeSectionId, relevantTerms);
 
-  const covered = new Set(selected.flatMap(({ startIndex, endIndex }) =>
-    Array.from({ length: endIndex - startIndex + 1 }, (_, offset) => startIndex + offset)));
+  // 未过期阶段摘要可以替代其覆盖的逐部摘要。来源已变化的冻结版仍保留
+  // 作者权威，但不能继续独占事实层：同时发送当前逐部摘要，让模型明确
+  // 看见冲突并以最新正文派生内容为事实依据。
+  const covered = new Set(selected.flatMap(({ startIndex, endIndex, stale }) =>
+    stale ? [] : Array.from(
+      { length: endIndex - startIndex + 1 }, (_, offset) => startIndex + offset,
+    )));
   const stageAt = new Map(selected.map((item) => [item.startIndex, item]));
   const rows = [];
   for (let position = 0; position < end; position += 1) {
@@ -187,35 +239,57 @@ function stageAwareBookSummaryRows(book, beforeSectionId) {
       const suffix = stage.startIndex === stage.endIndex
         ? `第${stage.startIndex + 1}部`
         : `第${stage.startIndex + 1}–${stage.endIndex + 1}部`;
-      rows.push(`阶段·${stage.item.title}（${suffix}）：\n${stage.item.summary}`);
-      continue;
+      rows.push(stage.stale
+        ? `阶段·${stage.item.title}（${suffix}；作者冻结版与当前来源不一致）：\n`
+          + '以下冻结文本保留作者意图，但若与随后列出的当前分部摘要冲突，以当前正文派生摘要为已发生事实。\n'
+          + stage.item.summary
+        : `阶段·${stage.item.title}（${suffix}）：\n${stage.item.summary}`);
+      if (!stage.stale) continue;
     }
     if (covered.has(position)) continue;
     const sectionId = sections[position];
     const item = book?.sectionSummaries?.[sectionId];
     if (!item || typeof item.summary !== 'string' || !item.summary) continue;
     const title = typeof item.title === 'string' && item.title ? ` · ${item.title}` : '';
-    rows.push(`第${position + 1}部${title}：\n${bookSectionSummaryWindow(item.summary)}`);
+    rows.push(`第${position + 1}部${title}：\n${bookSectionSummaryWindow(
+      item.summary, MAX_BOOK_SECTION_SUMMARY_CHARS, relevantTerms,
+    )}`);
   }
   return rows;
 }
 
-function fitRecentBookSummaryRows(rows, maxChars) {
+function fitRecentBookSummaryRows(rows, maxChars, relevantTerms = []) {
   if (joinedRowsLength(rows) <= maxChars) return rows.join('\n');
   const available = Math.max(0, maxChars - OMITTED_BOOK_SUMMARY_ROW.length - 1);
-  const selected = [];
+  const selected = new Map();
   let used = 0;
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    const row = rows[index];
-    const cost = row.length + (selected.length ? 1 : 0);
-    if (used + cost > available) break;
-    selected.unshift(row);
+  const addText = (index, text) => {
+    if (!text || selected.has(index)) return false;
+    const cost = text.length + (selected.size ? 1 : 0);
+    if (used + cost > available) return false;
+    selected.set(index, text);
     used += cost;
+    return true;
+  };
+  const addFull = (index) => addText(index, rows[index]);
+
+  // 最近一部是直接连续性的底座，即使单部窗口大于本次剩余额度也必须
+  // 先留一份有界首尾快照。另一半额度供久远相关部和更多最近部竞争。
+  if (rows.length && available > 0) {
+    const latestBudget = Math.max(1, Math.floor(available * 0.52));
+    addText(rows.length - 1, generationTextWindow(rows.at(-1), latestBudget));
   }
-  if (!selected.length && rows.length && available > 0) {
-    selected.push(generationTextWindow(rows.at(-1), available));
+  for (let index = 0; index < rows.length - 1; index += 1) {
+    if (!relevantTerms.some((term) => rows[index].includes(term))) continue;
+    const remaining = available - used - (selected.size ? 1 : 0);
+    if (remaining <= 0) break;
+    addText(index, generationTextWindow(rows[index], Math.min(rows[index].length, remaining)));
   }
-  return [OMITTED_BOOK_SUMMARY_ROW, ...selected].join('\n').slice(0, maxChars);
+  for (let index = rows.length - 2; index >= 0; index -= 1) addFull(index);
+
+  const output = [...selected.entries()].sort((left, right) => left[0] - right[0])
+    .map(([, text]) => text);
+  return [OMITTED_BOOK_SUMMARY_ROW, ...output].join('\n').slice(0, maxChars);
 }
 
 export function buildBookSummaryFromSectionSummaries(
@@ -228,11 +302,14 @@ export function buildBookSummaryFromSectionSummaries(
 
 export function generationPriorSectionSummary(
   book, currentSectionId, maxChars = MAX_BOOK_PROMPT_SUMMARY_CHARS,
+  { taskRelevantText = '' } = {},
 ) {
+  if (maxChars === 0) return '';
   const limit = Number.isSafeInteger(maxChars) && maxChars > 0
     ? maxChars : MAX_BOOK_PROMPT_SUMMARY_CHARS;
-  const rows = stageAwareBookSummaryRows(book, currentSectionId);
-  if (rows.length) return fitRecentBookSummaryRows(rows, limit);
+  const relevantTerms = generationMemoryRelevantTerms(book?.memory, taskRelevantText);
+  const rows = stageAwareBookSummaryRows(book, currentSectionId, relevantTerms);
+  if (rows.length) return fitRecentBookSummaryRows(rows, limit, relevantTerms);
   // 兼容早期只有 book.summary 的数据；一旦新的分部摘要索引建立，
   // 上面的按顺序选择会避免把当前部或未来部误当作前情。
   return !book?.sectionSummaries || !Object.keys(book.sectionSummaries).length
@@ -244,7 +321,8 @@ export function generationMemoryRelevantText({ book = {}, section = {}, prevChap
   return [
     generationPriorSectionSummary(book, section.id),
     recentSectionSummary(section.summary),
-    previousChapterEndingText(prevChapter?.content),
+    previousChapterEndingText(generationChapterContent(prevChapter)),
+    previousChapterHandoffText(prevChapter?.handoff),
     typeof prevChapter?.progress === 'string' ? prevChapter.progress : '',
     ...generationCharacterRows(book.characters),
     ...generationCharacterRows(section.characters),
@@ -252,48 +330,61 @@ export function generationMemoryRelevantText({ book = {}, section = {}, prevChap
   ].filter(Boolean).join('\n');
 }
 
-export function generationMemoryRows(memory, {
-  relevantText = '', maxChars = MAX_MEMORY_CONTEXT_CHARS,
+function chapterPlanRelevantRows(chapterPlan) {
+  return chapterPlan && typeof chapterPlan === 'object' ? [
+    chapterPlan.goal, chapterPlan.obstacle, chapterPlan.choice,
+    chapterPlan.payoff, chapterPlan.hook, chapterPlan.tensionArc,
+    chapterPlan.foreshadowing, chapterPlan.worldExpansion,
+    chapterPlan.decisionChain, chapterPlan.knowledgeDesign, chapterPlan.notes,
+    ...(Array.isArray(chapterPlan.scenes) ? chapterPlan.scenes.flatMap((scene) =>
+      scene && typeof scene === 'object' ? [
+        scene.title, scene.trigger, scene.desire, scene.obstacle,
+        scene.action, scene.turn, scene.cost,
+      ] : []) : []),
+  ].filter((value) => typeof value === 'string' && value) : [];
+}
+
+// 这是本地检索查询，不会原样发送给模型。当前策划和待审/待重写正文
+// 代表“这次任务具体在写谁和什么”，应高于近期摘要与全书人物名册，
+// 否则久未登场的物品、地点或旧伏笔容易在百万字记忆预算中被挤掉。
+export function generationMemoryTaskRelevantText({
+  chapterPlan = null, currentContent = '',
 } = {}) {
-  if (!memory || !Array.isArray(memory.facts)) return [];
-  const limit = Number.isSafeInteger(maxChars) && maxChars > 0
-    ? maxChars : MAX_MEMORY_CONTEXT_CHARS;
-  const ranked = memory.facts.flatMap((fact, index) => {
-    if (!fact || fact.status !== 'active'
-      || typeof fact.subject !== 'string' || typeof fact.predicate !== 'string'
-      || typeof fact.object !== 'string') return [];
-    const importance = Number.isInteger(fact.importance) ? fact.importance : 1;
-    const detailParts = generationMemoryDetailParts(fact.details);
-    const detailText = detailParts.join('；');
-    const relevant = Boolean(relevantText)
-      && (relevantText.includes(fact.subject)
-        || (fact.object.length >= 2 && fact.object.length <= 80 && relevantText.includes(fact.object))
-        || detailParts.some((part) => {
-          const value = part.slice(part.indexOf('=') + 1);
-          return value.length >= 2 && value.length <= 80 && relevantText.includes(value);
-        }));
-    const updatedAt = Number.isFinite(Date.parse(fact.updatedAt)) ? Date.parse(fact.updatedAt) : 0;
-    const sourceLabel = Number.isInteger(fact.source?.chapterIndex)
-      ? `第${fact.source.chapterIndex}章确认` : '已确认';
-    return [{
-      row: `- [${fact.kind || 'other'}] ${fact.subject}｜${fact.predicate}｜${fact.object}`
-        + `${detailText ? `；${detailText}` : ''}（${sourceLabel}）`,
-      relevant, importance, updatedAt, index,
-    }];
-  }).sort((a, b) => Number(b.relevant) - Number(a.relevant)
-    || b.importance - a.importance
-    || b.updatedAt - a.updatedAt
-    || a.index - b.index);
-  const rows = ranked.map((item) => item.row);
-  if (joinedRowsLength(rows) <= limit) return rows;
-  const selected = [];
-  let used = 0;
-  const available = Math.max(0, limit - OMITTED_MEMORY_ROW.length - 1);
-  for (const row of rows) {
-    const cost = row.length + (selected.length ? 1 : 0);
-    if (used + cost > available) continue;
-    selected.push(row);
-    used += cost;
-  }
-  return [...selected, OMITTED_MEMORY_ROW];
+  return [
+    typeof currentContent === 'string' ? currentContent : '',
+    ...chapterPlanRelevantRows(chapterPlan),
+  ].filter(Boolean).join('\n');
+}
+
+export function generationCharacterCraftRelevantText({
+  book = {}, section = {}, prevChapter = null, chapterPlan = null, currentContent = '',
+}) {
+  const planRows = chapterPlanRelevantRows(chapterPlan);
+  return [
+    generationPriorSectionSummary(book, section.id),
+    generationSectionOutlineText(section.outline?.content),
+    recentSectionSummary(section.summary),
+    previousChapterEndingText(generationChapterContent(prevChapter)),
+    previousChapterHandoffText(prevChapter?.handoff),
+    typeof prevChapter?.progress === 'string' ? prevChapter.progress : '',
+    generationTextWindow(currentContent, MAX_PREVIOUS_CHAPTER_ENDING_PROMPT_CHARS),
+    ...generationCharacterRows(section.characters),
+    ...generationCharacterRows(prevChapter?.characters),
+    ...planRows,
+  ].filter((value) => typeof value === 'string' && value).join('\n');
+}
+
+export function generationChapterMemorySelection(memory, {
+  book = {}, section = {}, prevChapter = null, chapterPlan = null,
+  currentContent = '', maxChars = MAX_MEMORY_CONTEXT_CHARS,
+} = {}) {
+  return generationMemorySelection(memory, {
+    relevantText: generationMemoryRelevantText({ book, section, prevChapter }),
+    taskRelevantText: generationMemoryTaskRelevantText({ chapterPlan, currentContent }),
+    maxChars,
+  });
+}
+
+export function generationChapterMemoryRows(memory, options = {}) {
+  return generationChapterMemorySelection(memory, options).rows;
 }

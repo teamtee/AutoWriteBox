@@ -1,11 +1,15 @@
-import type { ApiModelDiscoveryInput, ApiModelDiscoveryResult, ApiProfile, ApiProfileLibrary, ApiProfileSaveInput, ApiTaskRoute, ApiTaskRoutes, Book, BookMemoryLibrary, BookTree, BookSummary, Chapter, ChapterPublicationPreflight, ChapterPublicationResult, ChapterReview, Config, DeletedBook, MemoryDecisionAction, MemoryDecisionResult, MemoryFactMutationResult, PlatformConfirmationInput, Section, SectionPlan, SerializationSettings, StageSummaryInput, StageSummaryMutationResult, StorageDiagnostics, TitleSource, WritingAssetBindingResult, WritingAssetBookBinding, WritingAssetExtractionInput, WritingAssetExtractionResult, WritingAssetLibrary, WritingAssetReferenceInput } from './types';
-import { MAX_SECTION_PLAN_TITLE_CODE_POINTS, MAX_SECTION_PLAN_TITLES } from './sections';
-
-// 后端只公开稳定的大写错误码，可选携带一段已经脱敏的短详情。
-// 同一个合同同时保护普通 JSON 错误和 SSE 错误，避免异常同源响应把
-// 超长字符串直接渲染到 Toast 或错误页。
-const PUBLIC_ERROR_PAYLOAD = /^[A-Z][A-Z0-9_]{0,127}(?:: [^\r\n]{1,300})?$/;
-
+import type { ApiModelDiscoveryInput, ApiModelDiscoveryResult, ApiProfile, ApiProfileLibrary, ApiProfileSaveInput, ApiTaskRoute, ApiTaskRoutes, Book, BookMemoryLibrary, BookTree, BookSummary, Chapter, ChapterPlan, ChapterPlanDraftResult, ChapterPlanInput, ChapterPublicationPreflight, ChapterPublicationResult, Config, DeletedBook, MemoryDecisionAction, MemoryDecisionResult, MemoryFactMutationResult, PlatformConfirmationInput, Section, SerializationSettings, StageSummaryInput, StageSummaryMutationResult, StorageDiagnostics, StoryEngine, StoryEngineInput, TitleSource, WritingAssetBindingResult, WritingAssetBookBinding, WritingAssetExtractionInput, WritingAssetExtractionResult, WritingAssetLibrary, WritingAssetReferenceInput } from './types';
+import { PUBLIC_ERROR_PAYLOAD } from './api-contract';
+import {
+  MAX_SSE_STREAM_BYTES, MAX_STREAM_DELTA_CHARS, parseSSELines,
+  SSE_RESPONSE_INVALID_UTF8, SSE_RESPONSE_TOO_LARGE,
+} from './api-sse';
+import type { SSEEvent } from './api-sse';
+import { createCharacterCraftApi } from './character-craft-api';
+import { createPromiseLedgerApi } from './promise-ledger-api';
+import { createReviewApi } from './review-api';
+export { parseSSELines } from './api-sse';
+export type { PostprocessWarning, SSEEvent } from './api-sse';
 const apiErrorMessages: Record<string, string> = {
   LLM_BASE_URL_REQUIRED: '请先在 API 设置中填写 Base URL',
   LLM_MODEL_REQUIRED: '请先在 API 设置中填写模型名',
@@ -13,11 +17,13 @@ const apiErrorMessages: Record<string, string> = {
   LLM_MODEL_INVALID: '模型名不能包含换行或其他控制字符，请重新输入',
   LLM_API_KEY_INVALID: 'API Key 不能包含换行或其他控制字符，请重新输入',
   LLM_CONFIG_TOO_LARGE: '模型配置异常过长，请检查 Base URL、模型名和 API Key',
-  LLM_INPUT_TOO_LARGE: '当前作品上下文过长，无法安全发送给模型；请精简设定或分段生成',
+  LLM_INPUT_TOO_LARGE: '本次上下文超出模型输入上限，且分层预算未能降级。正常情况下超额材料会被自动裁剪并标注，出现本提示说明装配存在缺陷，请在章节页“API 上下文体检”查看各层实际占用',
   LLM_INPUT_INVALID: '当前生成请求结构异常，请刷新页面后重试',
   LLM_BUSY: '当前已有较多生成任务，请等待其中一个完成后再试',
   LLM_EMPTY_BODY: '模型服务返回了空响应，本次内容未保存；请检查接口兼容性后重试',
   INVALID_JSON: '请求内容不是有效的 JSON，请刷新页面后重试',
+  HOST_NOT_ALLOWED: '当前访问地址不受本地服务信任，请使用启动器显示的 localhost 或 127.0.0.1 地址',
+  ORIGIN_NOT_ALLOWED: '页面来源与本地服务地址不一致，已阻止跨站请求；请从启动器显示的地址重新打开',
   STORAGE_FULL: '本地磁盘空间或配额不足，内容未保存；请释放空间后重试',
   STORAGE_PERMISSION_DENIED: '项目数据目录不可写，内容未保存；请检查目录权限或只读状态',
   STORAGE_IO_ERROR: '本地磁盘读写失败，内容可能未保存；请检查磁盘状态并先备份 data 目录',
@@ -46,6 +52,7 @@ const apiErrorMessages: Record<string, string> = {
   PLATFORM_CONFIRMATION_DUPLICATE: '同名平台已有核对记录，请编辑原记录',
   PLATFORM_CONFIRMATION_LIMIT: '每本书最多保留 20 个平台核对记录，请先整理旧记录',
   BAD_REQUEST_TIMEOUT: '模型请求超时必须是 1000–3600000 毫秒的整数',
+  BAD_MODEL_CONTEXT_CHARS: '模型上下文窗口必须是 16000–2000000 字符的整数',
   API_KEY_REQUIRED_FOR_BASE_URL_CHANGE: '修改 Base URL 时必须重新输入 API Key，避免把旧密钥发送给新的服务地址',
   BAD_VERSION_REWRITE_PATH: '章节内容请使用章节页面中的生成或重写操作',
   BAD_PATH: '页面请求的内容位置无效，请刷新后重试',
@@ -54,6 +61,28 @@ const apiErrorMessages: Record<string, string> = {
   BAD_MODE: '页面提交的生成模式无效，请刷新后重试',
   BAD_WHIP: '请输入要调整正文的抽打意见',
   BAD_PREMISE: '故事设想不能为空，请输入后重试',
+  BAD_SECTION_OUTLINE: '分部规划必须是有效文本，请刷新页面后重试',
+  BAD_CHAPTER_PLAN: '章节策划卡格式无效，请检查各字段后重试',
+  BAD_CHAPTER_PLAN_REVISION: '页面缺少有效的策划卡修订号，请重新打开本章',
+  CHAPTER_PLAN_TOO_LARGE: '章节策划卡过长；章级字段各限 500 字、补充说明限 1000 字，场景最多 12 个且各字段限 300 字',
+  CHAPTER_PLAN_CONFLICT: '章节策划卡已被另一页面修改；已拒绝旧页面覆盖，请核对后重试',
+  CHAPTER_PLAN_QUALITY_DOWNGRADE: '当前策划已启用新版质量合同，旧页面不能降级覆盖；请刷新后继续编辑', CHAPTER_PLAN_RHYTHM_DOWNGRADE: '当前策划已启用写前节奏意图，旧页面不能降级覆盖；请刷新后继续编辑',
+  CHAPTER_PLAN_DRAFT_FAILED: '模型没有返回完整可用的章节与场景策划，本次没有改动当前草稿；请重试或切换模型',
+  CHAPTER_OUTPUT_LEAKED: '模型把策划、债务编号或审稿字段写进了小说正文，本次结果未保存；请重试或切换模型',
+  CHAPTER_PLAN_NOT_READY: '请先完成并保存章节策划的写前质量门槛，再生成正文',
+  BAD_STORY_ENGINE: '作品核心循环格式无效，请检查五项内容后重试',
+  BAD_STORY_ENGINE_REVISION: '页面缺少有效的核心循环修订号，请重新打开核心设定',
+  STORY_ENGINE_TOO_LARGE: '作品核心循环每项最多 500 字，请精简后重试',
+  STORY_ENGINE_CONFLICT: '作品核心循环已被另一页面修改；本次旧页面保存未覆盖新版',
+  BAD_PROMISE_LEDGER: '承诺账本结构无效，请刷新后重试', BAD_PROMISE_ENTRY: '请完整填写承诺、预计兑现章序和当前状态；兑现或放弃时还要填写结果',
+  BAD_PROMISE_LEDGER_REVISION: '页面缺少有效的承诺账本修订号，请重新打开核心设定', PROMISE_LEDGER_TOO_LARGE: '承诺账本内容过长；单条承诺和结果最多 500 字，推进记录最多 300 字',
+  PROMISE_LEDGER_LIMIT: '本书承诺账本已达到 1000 条上限，请先兑现、合并或清理无效条目', PROMISE_LEDGER_CONFLICT: '承诺账本已被另一页面修改；本次旧页面操作未覆盖新版', BAD_REVIEW_PROMISE_ANCHOR: '页面缺少正文、审稿或承诺账本版本标识，请重新打开本章', REVIEW_PROMISE_CANDIDATE_NOT_FOUND: '这条审稿账本候选已不存在，请重新审稿', REVIEW_PROMISE_CANDIDATE_STALE: '正文、策划或审稿已经变化，旧候选未写入账本；请重新审稿',
+  PROMISE_EVIDENCE_IMMUTABLE: '正文证据节拍只能由审稿候选确认或正文版本变化更新，不能在账本表单中伪造、编辑或删除', BAD_REVIEW_WORLD_GATE_ANCHOR: '页面缺少正文、审稿或世界进度版本标识，请重新打开本章', REVIEW_WORLD_GATE_CANDIDATE_NOT_FOUND: '本章没有可确认的世界门槛候选，请重新审稿', REVIEW_WORLD_GATE_CANDIDATE_STALE: '正文、分部合同、世界圣经或审稿已经变化，旧门槛候选未确认', WORLD_PROGRESS_CONFLICT: '世界层级进度已被另一页面修改；请刷新后重新确认',
+  PROMISE_ENTRY_NOT_FOUND: '该承诺已被另一页面删除，请刷新账本',
+  BAD_CHARACTER_CRAFT: '人物导演卡结构无效，请刷新后重试', BAD_CHARACTER_GUIDE: '人物导演卡至少需要姓名和一项有效的驱动力或声音规则',
+  BAD_RELATIONSHIP_GUIDE: '关系导演卡需要两个不同人物，并填写关系状态、张力、方向或温度变化', BAD_CHARACTER_CRAFT_ENTRY: '人物导演卡标识无效，请刷新后重试',
+  BAD_CHARACTER_CRAFT_REVISION: '页面缺少有效的人物导演卡修订号，请重新打开核心设定', CHARACTER_CRAFT_TOO_LARGE: '人物导演卡内容过长；单项最多 500 字、温度变化原因最多 300 字',
+  CHARACTER_CRAFT_LIMIT: '人物导演卡已达到数量上限，请先合并或清理不再使用的条目', CHARACTER_CRAFT_CONFLICT: '人物导演卡已被另一页面修改；本次旧页面操作未覆盖新版', CHARACTER_CRAFT_ENTRY_NOT_FOUND: '该人物导演卡已被另一页面删除，请刷新',
   BAD_ID: '请求中的作品、分部或章节标识无效，请刷新页面后重试',
   BAD_TITLE: '标题格式无效，请重新输入',
   BAD_CONFIG_PATCH: '页面提交的设置格式无效，请重新读取设置后重试',
@@ -65,6 +94,7 @@ const apiErrorMessages: Record<string, string> = {
   BOOK_CHAPTER_LIMIT: '该作品的总章节数已达上限',
   BOOK_LIBRARY_LIMIT: '书架作品数已达安全上限，请先备份并移走不再使用的作品',
   TRASH_BOOK_LIMIT: '回收站条目数已达安全上限；请先备份 data 目录，再人工整理 data/trash/books',
+  NOT_FOUND: '请求的页面或接口不存在，请刷新页面；若刚升级应用，请重启本地服务',
   BOOK_NOT_FOUND: '作品不存在或已被移入回收站，请刷新书架后重试',
   SECTION_NOT_FOUND: '分部不存在或已从作品索引中移除，请刷新后重试',
   CHAPTER_NOT_FOUND: '章节不存在或已从分部索引中移除，请刷新后重试',
@@ -79,6 +109,18 @@ const apiErrorMessages: Record<string, string> = {
   REVIEW_CONTEXT_STALE: '审稿期间大纲、设定或本部前情已经变化，本次旧上下文审稿未保存，请刷新后重新审稿',
   BAD_REVIEW_ANCHOR: '页面缺少有效的审稿正文或上下文标识，请刷新章节后重试',
   REVIEW_FAILED: '模型返回的审稿结果格式不完整，本次审稿未保存；请重新审稿',
+  BAD_GOLDEN_THREE_ANCHOR: '页面缺少有效的黄金三章审稿版本，请刷新第三章后重试',
+  GOLDEN_THREE_INCOMPLETE: '全书前三章尚未全部写入正文，暂时不能联合审稿',
+  GOLDEN_THREE_STALE: '联合审稿期间前三章或作品承诺已经变化，旧结果未保存；请刷新后重试',
+  GOLDEN_THREE_REVIEW_FAILED: '模型没有返回完整的黄金三章联合审稿，本次结果未保存；请重试或切换模型',
+  BAD_CHAPTER_REVISION_STAGE: '修订阶段无效，请刷新章节后重试',
+  BAD_CHAPTER_REVISION_ANCHOR: '页面缺少有效的正文或上下文版本，请刷新章节后重试',
+  CHAPTER_REVISION_CANDIDATE_STALE: '候选生成期间正文或故事上下文已经变化，旧候选未采用；请刷新后重试',
+  CHAPTER_REVISION_CANDIDATE_FAILED: '模型没有返回完整可用的章节候选；当前正文未改动，请重试或切换模型',
+  BAD_CHAPTER_REVIEW_REVISION_ANCHOR: '页面缺少当前正文、上下文或审稿版本，请刷新章节后重试',
+  CHAPTER_REVIEW_HAS_NO_REVISIONS: '当前有效审稿没有需要 API 精修的正文问题',
+  CHAPTER_REVIEW_REVISION_CANDIDATE_STALE: '精修期间正文、故事上下文或审稿已经变化；旧候选未采用，请刷新后重试',
+  CHAPTER_REVIEW_REVISION_CANDIDATE_FAILED: '写作模型没有返回完整可用的审稿精修候选；当前正文未改动',
   CHAPTER_EMPTY: '当前章节正文为空，请先生成或输入正文后再操作',
   VERSION_CONFLICT: '服务器内容已被另一页面更新；本次操作未执行，请刷新后确认',
   BAD_VERSION_REVISION: '页面缺少有效的版本标识，请刷新后重试',
@@ -88,6 +130,7 @@ const apiErrorMessages: Record<string, string> = {
   BAD_NEXT_CHAPTER_ANCHOR: '页面缺少当前末章标识，请刷新后重试',
   GENERATION_CONTEXT_CONFLICT: '生成期间章节结构、大纲、设定或前情已被另一页面更新；旧上下文结果未保存，请刷新后重新生成',
   BAD_GENERATION_CONTEXT_REVISION: '页面缺少有效的生成上下文标识，请刷新后重试',
+  SECTION_PLAN_WORLD_BIBLE_REQUIRED: '分部规划需要先在核心设定中用 API 建立合格的三层世界圣经',
   CONFIG_CONFLICT: '设置已被另一页面更新；本次旧配置未保存，请重新读取后再修改',
   BAD_CONFIG_REVISION: '页面缺少有效的设置修订号，请重新读取设置后再保存',
   STRUCTURE_TRANSACTION_RECOVERED: '检测到并完成了一笔此前中断的结构操作；本次操作未执行，请刷新确认后再操作',
@@ -146,7 +189,7 @@ const apiErrorMessages: Record<string, string> = {
   MEMORY_CONFLICT: '已有同一主体和属性的不同事实；请核对后显式替换，系统不会自动覆盖',
   MEMORY_FACT_LIMIT: '本书长期记忆事实已达安全上限，请先整理失效或低价值事实',
   MEMORY_REJECTION_LIMIT: '本书已拒绝候选记录已达安全上限，请先整理长期记忆',
-  MEMORY_RECOMPUTE_FAILED: '模型未返回完整的章摘要、人物与记忆候选，本次重算没有覆盖现有派生信息',
+  MEMORY_RECOMPUTE_FAILED: '模型未返回完整的章摘要、人物、章末交接快照与记忆候选，本次重算没有覆盖现有派生信息',
   BAD_STAGE_SUMMARY_ID: '阶段摘要标识无效，请刷新后重试',
   BAD_STAGE_SUMMARY_TITLE: '请输入 80 字以内的阶段名称',
   BAD_STAGE_SUMMARY_RANGE: '阶段起止分部无效，请重新选择',
@@ -258,10 +301,27 @@ const responseErrorDetail = async (r: Response) => {
   return { code, message: readableApiError(code ?? `HTTP ${r.status}`) };
 };
 const responseErrorMessage = async (r: Response) => (await responseErrorDetail(r)).message;
-const jpost = (p: string, b: unknown) =>
-  fetch(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(json);
+const jpost = (p: string, b: unknown, signal?: AbortSignal) =>
+  fetch(p, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(b), ...(signal ? { signal } : {}),
+  }).then(json);
 const getWithOptionalSignal = (path: string, signal?: AbortSignal) =>
   signal ? fetch(path, { signal }) : fetch(path);
+
+const characterCraftApi = createCharacterCraftApi({ json, jpost, getWithOptionalSignal });
+export const { deleteCharacterCraftEntry, getCharacterCraft,
+  saveCharacterGuide, saveRelationshipGuide } = characterCraftApi;
+export { createClientCharacterGuideId, createClientRelationshipGuideId,
+  createClientTemperatureChangeId } from './character-craft-api';
+const promiseLedgerApi = createPromiseLedgerApi({ json, jpost, getWithOptionalSignal });
+export const { deletePromiseLedgerEntry, getPromiseLedger,
+  savePromiseLedgerEntry } = promiseLedgerApi;
+export { createClientPromiseId, createClientPromiseProgressId } from './promise-ledger-api';
+const reviewApi = createReviewApi({ jpost });
+export const { applyChapterReviewPromiseCandidate, applyChapterReviewWorldGateCandidate,
+  generateChapterRevisionCandidate, generateChapterReviewRevisionCandidate,
+  verifyChapterReviewRevisionCandidate, reviewChapter, reviewGoldenThree } = reviewApi;
 
 export const getConfig = (signal?: AbortSignal): Promise<Config> =>
   getWithOptionalSignal('/api/config', signal).then(json);
@@ -318,15 +378,17 @@ export const createWritingAssetReference = (
 ): Promise<WritingAssetExtractionResult> => jpost('/api/writing-assets/reference', input);
 export const extractBookNativeWritingAsset = (
   bookId: string, sectionId: string, chapterId: string, name: string,
+  signal?: AbortSignal,
 ): Promise<WritingAssetExtractionResult> => jpost(
   `/api/writing-assets/books/${encodeURIComponent(bookId)}/sections/${encodeURIComponent(sectionId)}/chapters/${encodeURIComponent(chapterId)}/native`,
-  { name },
+  { name }, signal,
 );
 export const saveWritingAssetBookBinding = (
   bookId: string, binding: WritingAssetBookBinding, expectedRevision: string,
+  signal?: AbortSignal,
 ): Promise<WritingAssetBindingResult> => jpost(
   `/api/writing-assets/books/${encodeURIComponent(bookId)}`,
-  { binding, expectedRevision },
+  { binding, expectedRevision }, signal,
 );
 export const deleteWritingAsset = (id: string, expectedRevision: string): Promise<{
   ok: true; revision: string;
@@ -385,6 +447,37 @@ export const getChapter = (
   `/api/books/${bookId}/sections/${sectionId}/chapters/${chapterId}`,
   signal,
 ).then(json);
+export const saveChapterPlan = (
+  bookId: string,
+  sectionId: string,
+  chapterId: string,
+  plan: ChapterPlanInput,
+  expectedRevision: string,
+): Promise<ChapterPlan> => jpost(
+  `/api/books/${encodeURIComponent(bookId)}/sections/${encodeURIComponent(sectionId)}`
+    + `/chapters/${encodeURIComponent(chapterId)}/plan`,
+  { plan, expectedRevision },
+);
+export const generateChapterPlanDraft = (
+  bookId: string,
+  sectionId: string,
+  chapterId: string,
+  seedPlan: ChapterPlanInput,
+  expectedPlanRevision: string,
+  signal?: AbortSignal,
+): Promise<ChapterPlanDraftResult> => jpost(
+  '/api/gen/chapter-plan-draft',
+  { bookId, sectionId, chapterId, seedPlan, expectedPlanRevision },
+  signal,
+);
+export const saveStoryEngine = (
+  bookId: string,
+  storyEngine: StoryEngineInput,
+  expectedRevision: string,
+): Promise<StoryEngine> => jpost(
+  `/api/books/${encodeURIComponent(bookId)}/story-engine`,
+  { storyEngine, expectedRevision },
+);
 export const decideMemoryCandidate = (
   bookId: string,
   sectionId: string,
@@ -415,10 +508,11 @@ export const getChapterPublicationPreflight = (
   sectionId: string,
   chapterId: string,
   expectedBodyFingerprint: string,
+  signal?: AbortSignal,
 ): Promise<ChapterPublicationPreflight> => jpost(
   `/api/books/${encodeURIComponent(bookId)}/sections/${encodeURIComponent(sectionId)}`
     + `/chapters/${encodeURIComponent(chapterId)}/publication/preflight`,
-  { expectedBodyFingerprint },
+  { expectedBodyFingerprint }, signal,
 );
 export const recomputeChapterMemory = (
   bookId: string,
@@ -597,185 +691,7 @@ export const versionSave = (
 ) => jpost(`/api/books/${bookId}/version/save`, { path, text, expectedRevision });
 export const rewriteUrl = (bookId: string) => `/api/books/${bookId}/version/rewrite`;
 
-export type PostprocessWarning = 'title' | 'digest' | 'review';
-
-export interface SSEEvent {
-  delta?: string;
-  saved?: boolean;
-  done?: boolean;
-  error?: string;
-  chapterId?: string;
-  sections?: string;
-  parsedTitles?: string[];
-  parsedSections?: SectionPlan[];
-  parseError?: boolean;
-  postprocessWarnings?: PostprocessWarning[];
-}
 type MaybePromise<T = unknown> = T | Promise<T>;
-
-const INVALID_SSE_RESPONSE = '生成中断：响应格式无效';
-const SSE_RESPONSE_TOO_LARGE = '生成中断：响应内容超过安全上限';
-const SSE_RESPONSE_INVALID_UTF8 = '生成中断：响应编码无效';
-// 与服务端模型输出上限一致；单帧额外预留 JSON Unicode 转义空间。
-const MAX_STREAM_DELTA_CHARS = 200_000;
-const MAX_SSE_FRAME_CHARS = 1_700_000;
-// 服务端最多输出 20 万字符，并以不超过 1024 字符的 delta 批次发送；
-// 分部规划终止帧还会再携带一次完整文本。16 MiB 覆盖最坏 JSON 转义和
-// 小批次协议开销，同时阻止无限心跳、注释或 saved 帧长期占用连接。
-const MAX_SSE_STREAM_BYTES = 16 * 1024 * 1024;
-const SAFE_SSE_ID = /^[A-Za-z0-9_-]{1,128}$/;
-const MAX_SECTION_PLAN_FIELD_CODE_POINTS = 300;
-const invalidSSEEvent = (): never => { throw new Error(INVALID_SSE_RESPONSE); };
-
-function parseSSEEvent(payload: string): SSEEvent {
-  let value: unknown;
-  try {
-    value = JSON.parse(payload);
-  } catch {
-    // 这里拿到的 payload 已经由 SSE 空行完整分帧；真正的半包会留在
-    // parseSSELines 的 rest 中。静默丢弃完整坏帧可能让后续 done 被误报成功。
-    throw new Error(INVALID_SSE_RESPONSE);
-  }
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return invalidSSEEvent();
-  }
-  const event = value as Record<string, unknown>;
-  const hasOwn = (field: string) => Object.prototype.hasOwnProperty.call(event, field);
-  const primaryFields = ['delta', 'saved', 'error', 'done'] as const;
-  const primary = primaryFields.filter(hasOwn);
-  // 每帧只能表达一个状态。否则 error + done 会先报错再误报成功，
-  // delta + saved 也会让未确认完整的文本看起来已经落盘。
-  if (primary.length !== 1) return invalidSSEEvent();
-
-  const onlyKeys = (...allowed: string[]) => {
-    const accepted = new Set(allowed);
-    if (Object.keys(event).some((field) => !accepted.has(field))) invalidSSEEvent();
-  };
-  const state = primary[0];
-  if (state === 'delta') {
-    onlyKeys('delta');
-    if (typeof event.delta !== 'string') return invalidSSEEvent();
-    return event as SSEEvent;
-  }
-  if (state === 'error') {
-    onlyKeys('error');
-    if (typeof event.error !== 'string' || !PUBLIC_ERROR_PAYLOAD.test(event.error)) {
-      return invalidSSEEvent();
-    }
-    return event as SSEEvent;
-  }
-  if (state === 'saved') {
-    onlyKeys('saved', 'chapterId');
-    if (event.saved !== true
-      || (hasOwn('chapterId')
-        && (typeof event.chapterId !== 'string' || !SAFE_SSE_ID.test(event.chapterId)))) {
-      return invalidSSEEvent();
-    }
-    return event as SSEEvent;
-  }
-
-  onlyKeys('done', 'chapterId', 'sections', 'parsedTitles', 'parsedSections', 'parseError', 'postprocessWarnings');
-  if (event.done !== true) return invalidSSEEvent();
-  if (hasOwn('chapterId')
-    && (typeof event.chapterId !== 'string' || !SAFE_SSE_ID.test(event.chapterId))) {
-    return invalidSSEEvent();
-  }
-  if (hasOwn('sections') && (typeof event.sections !== 'string'
-    || !event.sections.trim() || event.sections.length > MAX_STREAM_DELTA_CHARS)) {
-    return invalidSSEEvent();
-  }
-  if (hasOwn('parsedTitles') && (!Array.isArray(event.parsedTitles)
-    || event.parsedTitles.length < 2
-    || event.parsedTitles.length > MAX_SECTION_PLAN_TITLES
-    || event.parsedTitles.some((title) => typeof title !== 'string'
-      || !title.trim()
-      || Array.from(title).length > MAX_SECTION_PLAN_TITLE_CODE_POINTS))) {
-    return invalidSSEEvent();
-  }
-  if (hasOwn('parsedSections')) {
-    const fields = [
-      'title', 'summary', 'promise', 'goal', 'obstacle', 'progress',
-      'climax', 'payoff', 'stateChange',
-    ];
-    if (!Array.isArray(event.parsedSections)
-      || event.parsedSections.length < 2
-      || event.parsedSections.length > MAX_SECTION_PLAN_TITLES
-      || event.parsedSections.some((item) => {
-        if (!item || typeof item !== 'object' || Array.isArray(item)) return true;
-        const row = item as Record<string, unknown>;
-        return Object.keys(row).some((field) => !fields.includes(field))
-          || fields.some((field) => typeof row[field] !== 'string'
-            || (field !== 'summary' && !(row[field] as string).trim())
-            || Array.from(row[field] as string).length
-              > (field === 'title'
-                ? MAX_SECTION_PLAN_TITLE_CODE_POINTS
-                : MAX_SECTION_PLAN_FIELD_CODE_POINTS));
-      })) {
-      return invalidSSEEvent();
-    }
-  }
-  if (hasOwn('parseError') && event.parseError !== true) return invalidSSEEvent();
-  if (hasOwn('postprocessWarnings')) {
-    if (!Array.isArray(event.postprocessWarnings)
-      || event.postprocessWarnings.length < 1
-      || event.postprocessWarnings.length > 2
-      || new Set(event.postprocessWarnings).size !== event.postprocessWarnings.length
-      || event.postprocessWarnings.some((warning) => warning !== 'title'
-        && warning !== 'digest' && warning !== 'review')) {
-      return invalidSSEEvent();
-    }
-    const chapterWarnings = event.postprocessWarnings.every(
-      (warning) => warning === 'digest' || warning === 'review',
-    );
-    const outlineWarning = event.postprocessWarnings.length === 1
-      && event.postprocessWarnings[0] === 'title';
-    // 章节只允许摘要/审稿告警；无其它元数据的版本终止帧只允许自动书名
-    // 告警。分部规划和混合告警一律拒绝，避免调用方误解终止状态。
-    if ((hasOwn('chapterId') && !chapterWarnings)
-      || (!hasOwn('chapterId') && !outlineWarning)
-      || hasOwn('sections')) return invalidSSEEvent();
-  }
-  const hasParsedTitles = hasOwn('parsedTitles');
-  const hasParsedSections = hasOwn('parsedSections');
-  const hasParseError = hasOwn('parseError');
-  if (hasParsedTitles && hasParseError) return invalidSSEEvent();
-  if (hasParsedSections && (!hasParsedTitles || hasParseError)) return invalidSSEEvent();
-  if (hasParsedSections && Array.isArray(event.parsedTitles)) {
-    const parsedTitles = event.parsedTitles as string[];
-    if ((event.parsedSections as SectionPlan[]).some(
-      (item, index) => item.title !== parsedTitles[index],
-    )) return invalidSSEEvent();
-  }
-  if ((hasParsedTitles || hasParsedSections || hasParseError) && !hasOwn('sections')) return invalidSSEEvent();
-
-  const metadataGroups = [
-    hasOwn('chapterId'),
-    hasOwn('sections') || hasParsedTitles || hasParseError,
-  ].filter(Boolean).length;
-  if (metadataGroups > 1) return invalidSSEEvent();
-  return event as SSEEvent;
-}
-
-export function parseSSELines(chunk: string, buffer: string): { events: SSEEvent[]; rest: string } {
-  const events: SSEEvent[] = [];
-  const parts = (buffer + chunk).split(/\r?\n\r?\n/);
-  const rest = parts.pop() ?? '';
-  if (rest.length > MAX_SSE_FRAME_CHARS) throw new Error(SSE_RESPONSE_TOO_LARGE);
-  for (const part of parts) {
-    if (part.length > MAX_SSE_FRAME_CHARS) throw new Error(SSE_RESPONSE_TOO_LARGE);
-    const lines = part.split(/\r?\n/).filter((line) => line.startsWith('data:'));
-    if (!lines.length) continue;
-    const payload = lines.map((line) => line.slice(5).trimStart()).join('\n').trim();
-    if (!payload) continue;
-    const event = parseSSEEvent(payload);
-    events.push(event);
-    // 与服务端上游解析保持一致：首个终止帧就是协议边界。同一网络块中
-    // done/error 后的代理尾帧或异常字节不能再把已完成结果翻转成失败，
-    // 也不能让后续 delta 在终止后进入正文。
-    if (event.done || event.error) break;
-  }
-  return { events, rest };
-}
 
 export interface StreamGenHandle {
   abort: () => void;
@@ -882,20 +798,3 @@ export function streamGen(
     settled: running,
   };
 }
-
-export const reviewChapter = (
-  bookId: string,
-  sectionId: string,
-  chapterId: string,
-  expectedBodyFingerprint: string,
-  expectedContextRevision: string,
-  signal?: AbortSignal,
-): Promise<ChapterReview> => fetch(
-  `/api/books/${bookId}/sections/${sectionId}/chapters/${chapterId}/review`,
-  {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ expectedBodyFingerprint, expectedContextRevision }),
-    ...(signal ? { signal } : {}),
-  },
-).then(json);

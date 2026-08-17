@@ -1,11 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
-  Book, BookTree, BookSummary, Chapter, DeletedBook, SectionPlan,
+  Book, BookTree, BookSummary, Chapter, ChapterPlan, ChapterPlanInput,
+  DeletedBook, SectionPlan,
   PlatformConfirmationInput, StorageDiagnostics, Versioned,
 } from './types';
 import type { Selection } from './store';
-import { firstSelectable, selectionExists } from './store';
 import * as api from './api';
+import {
+  adoptSectionTitles, applyShelfSupplementalLoadResult,
+  chapterPostprocessWarningMessage, lastChapterIdForSection, lastSectionIdForBook,
+  loadBookWorkspace, loadShelfBooks, localDraftBlockReason, messageOf,
+  nextChapterSelection,
+  nextSectionPlanReturnFocus, outlinePostprocessWarningMessage,
+  ownsActiveGeneration, reconcileAcknowledgedCreationOpen,
+  reconcileCreatedShelfMutationFailure, reconcileGenerationFailure,
+  reconcilePersistedMutationFailure, reconcileVersionConflict,
+  refreshOwnedGeneration, refreshPersistedChange, refreshStoppedGeneration,
+  runPersistedCreation,
+  refreshStoppedReview, runPersistedReviewRequest, runShelfMutation,
+  saveChapterPlanWithReconciliation,
+  shouldDisableSidebar,
+  shouldDisableVersionedBox, shouldShowFirstRun, shouldWarnBeforeUnloadForApp,
+  updateDirtyDraftPaths, verifiedShelfRefresh,
+} from './app-workflows';
 import { useToast } from './components/Toast';
 import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
@@ -28,633 +45,10 @@ import { useBeforeUnloadWarning } from './components/VersionedBox';
 // 顶层视图：书架 / 单本书
 type View = 'shelf' | 'book';
 type LoadedChapter = { sectionId: string; chapter: Chapter };
-type WorkspaceSnapshot = {
-  tree: BookTree;
-  selection: Selection;
-  loadedChapter: LoadedChapter | null;
-};
+export * from './app-workflows';
 export { runExclusiveAction as runExclusiveSectionAdoption } from './asyncAction';
 export { runExclusiveAction as runExclusiveStructureMutation } from './asyncAction';
 export { runExclusiveAction as runExclusiveVersionMutation } from './asyncAction';
-
-const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e);
-
-export async function loadShelfBooks(
-  listBooks: (signal?: AbortSignal) => Promise<BookSummary[]>,
-  setBooks: (books: BookSummary[]) => void,
-  setShelfError: (message: string | null) => void,
-  onError?: (message: string) => void,
-  isCurrent: () => boolean = () => true,
-  signal?: AbortSignal,
-) {
-  try {
-    const list = await listBooks(signal);
-    if (!isCurrent()) return null;
-    setBooks(list);
-    setShelfError(null);
-    return list;
-  } catch (e) {
-    if (!isCurrent()) return null;
-    const message = messageOf(e);
-    setShelfError(message);
-    onError?.(message);
-    return null;
-  }
-}
-
-export function applyShelfSupplementalLoadResult<T>(
-  result: PromiseSettledResult<T>,
-  setValue: (value: T) => void,
-  setError: (message: string | null) => void,
-): string | null {
-  if (result.status === 'fulfilled') {
-    setValue(result.value);
-    setError(null);
-    return null;
-  }
-  // 辅助列表失败时保留上一次成功结果，避免回收站副本或
-  // 数据异常告警在短暂网络/读盘故障时从界面消失。
-  const message = messageOf(result.reason);
-  setError(message);
-  return message;
-}
-
-export function verifiedShelfRefresh(
-  books: BookSummary[] | null,
-  { requireTrash = false, trashError = null }: {
-    requireTrash?: boolean;
-    trashError?: string | null;
-  } = {},
-): BookSummary[] | null {
-  if (!books || (requireTrash && trashError)) return null;
-  return books;
-}
-
-export async function loadBookWorkspace({
-  bookId,
-  requestedSelection,
-  getTree,
-  getChapter,
-  signal,
-  isCurrent = () => true,
-  setChapterLoading,
-}: {
-  bookId: string;
-  requestedSelection?: Selection;
-  getTree: (bookId: string, signal?: AbortSignal) => Promise<BookTree>;
-  getChapter: (
-    bookId: string,
-    sectionId: string,
-    chapterId: string,
-    signal?: AbortSignal,
-  ) => Promise<Chapter>;
-  signal?: AbortSignal;
-  isCurrent?: () => boolean;
-  setChapterLoading?: (loading: boolean) => void;
-}): Promise<WorkspaceSnapshot | null> {
-  try {
-    const tree = await getTree(bookId, signal);
-    // 树请求期间可能已切换作品或章节；旧请求不得再改变 loading，
-    // 也不应继续请求已经失去所有权的章节正文。
-    if (!isCurrent()) return null;
-    const selection = requestedSelection && selectionExists(tree, requestedSelection)
-      ? requestedSelection
-      : firstSelectable(tree);
-    setChapterLoading?.(selection.kind === 'chapter');
-    const loadedChapter = selection.kind === 'chapter'
-      ? {
-        sectionId: selection.sectionId,
-        chapter: await getChapter(bookId, selection.sectionId, selection.chapterId, signal),
-      }
-      : null;
-    if (!isCurrent()) return null;
-    setChapterLoading?.(false);
-    return { tree, selection, loadedChapter };
-  } catch (error) {
-    if (!isCurrent()) return null;
-    setChapterLoading?.(false);
-    throw error;
-  }
-}
-
-export function shouldShowFirstRun({
-  creating, books, shelfError, hasStorageIssues = false, hasDeletedBooks = false,
-  hasAuxiliaryLoadError = false,
-}: {
-  creating: boolean;
-  books: BookSummary[];
-  shelfError: string | null;
-  hasStorageIssues?: boolean;
-  hasDeletedBooks?: boolean;
-  hasAuxiliaryLoadError?: boolean;
-}) {
-  return creating || (!shelfError && books.length === 0 && !hasStorageIssues
-    && !hasDeletedBooks && !hasAuxiliaryLoadError);
-}
-
-export function shouldDisableSidebar({ streaming, structureMutating, reviewing = false, versionMutating = false, planAdopting = false }: {
-  streaming: boolean;
-  structureMutating: boolean;
-  reviewing?: boolean;
-  versionMutating?: boolean;
-  planAdopting?: boolean;
-}) {
-  return streaming || structureMutating || reviewing || versionMutating || planAdopting;
-}
-
-export function shouldDisableVersionedBox({ streaming, versionMutating, reviewing = false, structureMutating = false, planAdopting = false }: {
-  streaming: boolean;
-  versionMutating: boolean;
-  reviewing?: boolean;
-  structureMutating?: boolean;
-  planAdopting?: boolean;
-}) {
-  return streaming || versionMutating || reviewing || structureMutating || planAdopting;
-}
-
-export function lastChapterIdForSection(tree: BookTree, sectionId: string): string | null {
-  const chapters = tree.sections.find((section) => section.id === sectionId)?.chapters;
-  return chapters?.length ? chapters[chapters.length - 1].id : null;
-}
-
-export function nextChapterSelection(tree: BookTree, selection: Selection): Selection | null {
-  if (selection.kind !== 'chapter') return null;
-  const sectionIndex = tree.sections.findIndex((section) => section.id === selection.sectionId);
-  if (sectionIndex < 0) return null;
-  const chapterIndex = tree.sections[sectionIndex].chapters
-    .findIndex((chapter) => chapter.id === selection.chapterId);
-  if (chapterIndex < 0) return null;
-
-  const nextInSection = tree.sections[sectionIndex].chapters[chapterIndex + 1];
-  if (nextInSection) {
-    return { kind: 'chapter', sectionId: selection.sectionId, chapterId: nextInSection.id };
-  }
-  for (const section of tree.sections.slice(sectionIndex + 1)) {
-    const firstChapter = section.chapters[0];
-    if (firstChapter) {
-      return { kind: 'chapter', sectionId: section.id, chapterId: firstChapter.id };
-    }
-  }
-  return null;
-}
-
-export function lastSectionIdForBook(tree: BookTree): string | null {
-  return tree.sections.length ? tree.sections[tree.sections.length - 1].id : null;
-}
-
-export function updateDirtyDraftPaths(
-  paths: Set<string>, path: string, dirty: boolean,
-): boolean {
-  if (dirty) paths.add(path);
-  else paths.delete(path);
-  return paths.size > 0;
-}
-
-export function shouldWarnBeforeUnloadForApp({
-  creationPremiseDraft, whipDraft, sectionPlanDraft,
-  streaming, reviewing, versionMutating, structureMutating, planAdopting, shelfMutating,
-}: {
-  creationPremiseDraft: boolean;
-  whipDraft: boolean;
-  sectionPlanDraft: boolean;
-  streaming: boolean;
-  reviewing: boolean;
-  versionMutating: boolean;
-  structureMutating: boolean;
-  planAdopting: boolean;
-  shelfMutating: boolean;
-}): boolean {
-  return creationPremiseDraft || whipDraft || sectionPlanDraft
-    || streaming || reviewing || versionMutating || structureMutating
-    || planAdopting || shelfMutating;
-}
-
-export function localDraftBlockReason({
-  hasEditorDraft, hasWhipDraft, allowWhipDraft = false,
-}: {
-  hasEditorDraft: boolean;
-  hasWhipDraft: boolean;
-  allowWhipDraft?: boolean;
-}): 'editor' | 'whip' | null {
-  if (hasEditorDraft) return 'editor';
-  if (hasWhipDraft && !allowWhipDraft) return 'whip';
-  return null;
-}
-
-export function ownsActiveGeneration({
-  running, token, currentToken,
-}: {
-  running: boolean;
-  token: number;
-  currentToken: number;
-}) {
-  return running && token === currentToken;
-}
-
-export function chapterPostprocessWarningMessage(
-  warnings: api.PostprocessWarning[] | undefined,
-): string | null {
-  const digestFailed = warnings?.includes('digest');
-  const reviewFailed = warnings?.includes('review');
-  if (digestFailed && reviewFailed) {
-    return '正文已保存，但摘要/剧情路标/人物提取和自动审稿均未完成；继续生成下一章时可用前情会较少，请先检查模型 JSON 兼容性，审稿可通过页面按钮手动重试';
-  }
-  if (digestFailed) {
-    return '正文已保存，但摘要/剧情路标/人物提取未完成；继续生成下一章时可用前情会较少，请检查模型 JSON 兼容性';
-  }
-  if (reviewFailed) return '正文已保存，但自动审稿未完成；可通过页面审稿按钮手动重试';
-  return null;
-}
-
-export function outlinePostprocessWarningMessage(
-  warnings: api.PostprocessWarning[] | undefined,
-): string | null {
-  if (!warnings?.includes('title')) return null;
-  return '大纲已保存，但自动书名未生成；当前默认名称保持不变，可返回书架手动改名';
-}
-
-export function nextSectionPlanReturnFocus<T>({
-  current, active, activeInsideDialog,
-}: {
-  current: T | null;
-  active: T | null;
-  activeInsideDialog: boolean;
-}): T | null {
-  return active && !activeInsideDialog ? active : current;
-}
-
-export async function runShelfMutation({
-  action,
-  refresh,
-  onSuccess,
-  onFailure,
-  isConflictFailure,
-  onConflictFailure,
-  onConflictRefreshFailure,
-  onAmbiguousFailure,
-  onAmbiguousRefreshFailure,
-  onRefreshFailure,
-}: {
-  action: () => Promise<unknown>;
-  refresh: () => Promise<BookSummary[] | null>;
-  onSuccess: () => void;
-  onFailure: (e: unknown) => void;
-  isConflictFailure?: (e: unknown) => boolean;
-  onConflictFailure?: (e: unknown) => void;
-  onConflictRefreshFailure?: (e: unknown) => void;
-  onAmbiguousFailure?: (e: unknown) => void;
-  onAmbiguousRefreshFailure?: (e: unknown) => void;
-  onRefreshFailure?: () => void;
-}) {
-  try {
-    await action();
-  } catch (e) {
-    const conflict = Boolean(isConflictFailure?.(e));
-    if (conflict || api.isAmbiguousApiFailure(e)) {
-      let refreshed: BookSummary[] | null = null;
-      try { refreshed = await refresh(); }
-      catch { /* loadShelf 通常已自行收敛错误；这里仍保持未知状态。 */ }
-      if (refreshed) {
-        if (conflict) onConflictFailure?.(e);
-        else onAmbiguousFailure?.(e);
-      } else if (conflict) onConflictRefreshFailure?.(e);
-      else onAmbiguousRefreshFailure?.(e);
-      return false;
-    }
-    onFailure(e);
-    return false;
-  }
-  let refreshed: BookSummary[] | null;
-  try { refreshed = await refresh(); }
-  catch {
-    onRefreshFailure?.();
-    return false;
-  }
-  if (!refreshed) {
-    onRefreshFailure?.();
-    return false;
-  }
-  onSuccess();
-  return true;
-}
-
-export async function reconcileCreatedShelfMutationFailure({
-  error,
-  expectedBookId,
-  refresh,
-}: {
-  error: unknown;
-  expectedBookId: string;
-  refresh: () => Promise<BookSummary[] | null>;
-}): Promise<{
-  status: 'explicit_failure' | 'created' | 'not_created' | 'unknown';
-  createdIds: string[];
-}> {
-  if (!api.isAmbiguousApiFailure(error)) {
-    return { status: 'explicit_failure', createdIds: [] };
-  }
-  let refreshed: BookSummary[] | null;
-  try { refreshed = await refresh(); }
-  catch { return { status: 'unknown', createdIds: [] }; }
-  if (!refreshed) return { status: 'unknown', createdIds: [] };
-  // 服务端严格使用本次请求预分配的 ID。只匹配它，避免把另一标签页
-  // 同时创建或导入的作品误认为本次操作已经成功。
-  const createdIds = refreshed.some((book) => book.id === expectedBookId)
-    ? [expectedBookId]
-    : [];
-  return {
-    status: createdIds.length ? 'created' : 'not_created',
-    createdIds,
-  };
-}
-
-export async function reconcileAcknowledgedCreationOpen({
-  expectedBookId,
-  open,
-  refresh,
-}: {
-  expectedBookId: string;
-  open: () => Promise<boolean>;
-  refresh: () => Promise<BookSummary[] | null>;
-}): Promise<'opened' | 'shelf_refreshed' | 'unavailable'> {
-  try {
-    if (await open()) return 'opened';
-  } catch { /* 创建已确认；继续用书架精确核对可见性。 */ }
-  let refreshed: BookSummary[] | null = null;
-  try { refreshed = await refresh(); }
-  catch { /* 调用方将展示“已创建但不可确认页面状态”。 */ }
-  return refreshed?.some((book) => book.id === expectedBookId)
-    ? 'shelf_refreshed'
-    : 'unavailable';
-}
-
-export async function reconcilePersistedMutationFailure({
-  error,
-  refresh,
-}: {
-  error: unknown;
-  refresh: () => Promise<void>;
-}): Promise<
-  'explicit_failure'
-  | 'conflict'
-  | 'conflict_refresh_failed'
-  | 'recovered'
-  | 'recovered_refresh_failed'
-  | 'refreshed'
-  | 'unknown'
-> {
-  const structureConflict = api.isApiErrorCode(error, 'NEXT_SECTION_CONFLICT')
-    || api.isApiErrorCode(error, 'NEXT_CHAPTER_CONFLICT');
-  if (structureConflict) {
-    try {
-      await refresh();
-      return 'conflict';
-    } catch {
-      return 'conflict_refresh_failed';
-    }
-  }
-  const recoveredStructure = api.isApiErrorCode(error, 'STRUCTURE_TRANSACTION_RECOVERED');
-  if (recoveredStructure) {
-    try {
-      await refresh();
-      return 'recovered';
-    } catch {
-      return 'recovered_refresh_failed';
-    }
-  }
-  if (!api.isAmbiguousApiFailure(error)) return 'explicit_failure';
-  try {
-    await refresh();
-    return 'refreshed';
-  } catch {
-    return 'unknown';
-  }
-}
-
-export async function reconcileVersionConflict({
-  error,
-  refresh,
-  onRefreshed,
-  onRefreshFailure,
-}: {
-  error: unknown;
-  refresh: () => Promise<void>;
-  onRefreshed: () => void;
-  onRefreshFailure: (error: unknown) => void;
-}) {
-  if (!api.isApiErrorCode(error, 'VERSION_CONFLICT')) return false;
-  try {
-    await refresh();
-    onRefreshed();
-  } catch (refreshError) {
-    onRefreshFailure(refreshError);
-  }
-  return true;
-}
-
-// 持久化已成功后单独刷新页面数据。调用方据返回值区分“操作失败”和
-// “操作已落盘但刷新失败”，避免给用户错误的重试暗示。
-export async function refreshPersistedChange(refresh: () => Promise<void>): Promise<unknown | null> {
-  try {
-    await refresh();
-    return null;
-  } catch (e) {
-    return e;
-  }
-}
-
-// 生成完成后刷新页面前后都要确认所有权：停止按钮或更新一轮生成会使旧回调
-// 立即失效。这样迟到的 done 既不会启动旧刷新，也不会在刷新等待期间失去
-// 所有权后继续弹出成功提示。
-export async function refreshOwnedGeneration({
-  owns, refresh,
-}: {
-  owns: () => boolean;
-  refresh: () => Promise<void>;
-}): Promise<{ owned: boolean; refreshError: unknown | null }> {
-  if (!owns()) return { owned: false, refreshError: null };
-  const refreshError = await refreshPersistedChange(refresh);
-  return { owned: owns(), refreshError };
-}
-
-export async function refreshStoppedGeneration({
-  pending,
-  savedSelection,
-  fallbackSelection,
-  reload,
-}: {
-  pending?: Promise<unknown> | null;
-  savedSelection: Selection | null;
-  fallbackSelection: Selection;
-  reload: (selection: Selection) => Promise<void>;
-}): Promise<unknown | null> {
-  // AbortController 只发出取消请求，不代表浏览器流任务或服务端提交边界
-  // 已经收尾。先等流读取及其回调退出，再读取磁盘上的最终状态。
-  try { await pending; }
-  catch { /* 原流错误由所属回调处理；停止核对仍以磁盘为准。 */ }
-  // 停止与服务端提交可能同时发生。即使浏览器还没收到 saved 事件，也要
-  // 重新读取磁盘；否则旧页面可能在一次实际已落盘的生成后继续显示旧版本。
-  try {
-    await reload(savedSelection ?? fallbackSelection);
-    return null;
-  } catch (error) {
-    return error;
-  }
-}
-
-export async function refreshStoppedReview({
-  pending,
-  selection,
-  reload,
-}: {
-  pending: Promise<unknown> | null;
-  selection: Selection;
-  reload: (selection: Selection) => Promise<void>;
-}): Promise<unknown | null> {
-  return refreshStoppedGeneration({
-    pending,
-    savedSelection: null,
-    fallbackSelection: selection,
-    reload,
-  });
-}
-
-export async function reconcileGenerationFailure({
-  message,
-  savedSelection,
-  fallbackSelection = null,
-  reload,
-  onUnsavedFailure,
-  onUnsavedRefreshFailure,
-  onSavedFailure,
-  onSavedRefreshFailure,
-}: {
-  message: string;
-  savedSelection: Selection | null;
-  fallbackSelection?: Selection | null;
-  reload: (selection: Selection) => Promise<void>;
-  onUnsavedFailure: (message: string) => void;
-  onUnsavedRefreshFailure?: (message: string, error: unknown) => void;
-  onSavedFailure: (message: string) => void;
-  onSavedRefreshFailure: (message: string, error: unknown) => void;
-}) {
-  const targetSelection = savedSelection ?? fallbackSelection;
-  if (!targetSelection) {
-    onUnsavedFailure(message);
-    return false;
-  }
-  try {
-    await reload(targetSelection);
-  } catch (error) {
-    if (savedSelection) onSavedRefreshFailure(message, error);
-    else if (onUnsavedRefreshFailure) onUnsavedRefreshFailure(message, error);
-    else onUnsavedFailure(message);
-    return false;
-  }
-  if (savedSelection) {
-    onSavedFailure(message);
-    return true;
-  }
-  onUnsavedFailure(message);
-  return false;
-}
-
-export async function adoptSectionTitles({
-  titles,
-  addSection,
-  reload,
-  onSuccess,
-  onPartialFailure,
-  isAmbiguousFailure,
-  isRecoveredFailure,
-  isConflictFailure,
-  onAmbiguousFailure,
-  onAmbiguousRefreshFailure,
-  onRecoveredFailure,
-  onRecoveredRefreshFailure,
-  onConflictFailure,
-  onConflictRefreshFailure,
-  onRefreshFailure,
-  onFailure,
-  onFinish,
-}: {
-  titles: string[];
-  addSection: (title: string) => Promise<unknown>;
-  reload: () => Promise<void>;
-  onSuccess: (created: number) => void;
-  onPartialFailure: (created: number, total: number, e: unknown) => void;
-  isAmbiguousFailure?: (e: unknown) => boolean;
-  isRecoveredFailure?: (e: unknown) => boolean;
-  isConflictFailure?: (e: unknown) => boolean;
-  onAmbiguousFailure?: (acknowledged: number, total: number, e: unknown) => void;
-  onAmbiguousRefreshFailure?: (
-    acknowledged: number, total: number, addError: unknown, refreshError: unknown,
-  ) => void;
-  onRecoveredFailure?: (acknowledged: number, total: number, e: unknown) => void;
-  onRecoveredRefreshFailure?: (
-    acknowledged: number, total: number, addError: unknown, refreshError: unknown,
-  ) => void;
-  onConflictFailure?: (acknowledged: number, total: number, e: unknown) => void;
-  onConflictRefreshFailure?: (
-    acknowledged: number, total: number, addError: unknown, refreshError: unknown,
-  ) => void;
-  onRefreshFailure?: (created: number, total: number, e: unknown) => void;
-  onFailure: (e: unknown) => void;
-  onFinish: () => void;
-}) {
-  let created = 0;
-  let addError: unknown = null;
-  for (const title of titles) {
-    try {
-      await addSection(title);
-      created += 1;
-    } catch (e) {
-      addError = e;
-      break;
-    }
-  }
-  const ambiguous = addError !== null && Boolean(isAmbiguousFailure?.(addError));
-  const recovered = addError !== null && Boolean(isRecoveredFailure?.(addError));
-  const conflict = addError !== null && Boolean(isConflictFailure?.(addError));
-  if (created === 0 && addError && !ambiguous && !recovered && !conflict) {
-    onFailure(addError);
-    return { created, total: titles.length, ok: false };
-  }
-  try {
-    await reload();
-  } catch (e) {
-    if (ambiguous) {
-      if (onAmbiguousRefreshFailure) {
-        onAmbiguousRefreshFailure(created, titles.length, addError, e);
-      } else onRefreshFailure?.(created, titles.length, e);
-    } else if (recovered) {
-      if (onRecoveredRefreshFailure) {
-        onRecoveredRefreshFailure(created, titles.length, addError, e);
-      } else onRefreshFailure?.(created, titles.length, e);
-    } else if (conflict) {
-      if (onConflictRefreshFailure) {
-        onConflictRefreshFailure(created, titles.length, addError, e);
-      } else onRefreshFailure?.(created, titles.length, e);
-    } else onRefreshFailure?.(created, titles.length, e);
-    onFinish();
-    return { created, total: titles.length, ok: false };
-  }
-  if (addError) {
-    if (ambiguous && onAmbiguousFailure) {
-      onAmbiguousFailure(created, titles.length, addError);
-    } else if (recovered && onRecoveredFailure) {
-      onRecoveredFailure(created, titles.length, addError);
-    } else if (conflict && onConflictFailure) {
-      onConflictFailure(created, titles.length, addError);
-    } else if (created > 0) onPartialFailure(created, titles.length, addError);
-    else onFailure(addError);
-    onFinish();
-    return { created, total: titles.length, ok: false };
-  }
-  onSuccess(created);
-  onFinish();
-  return { created, total: titles.length, ok: true };
-}
 
 export default function App() {
   const toast = useToast();
@@ -701,6 +95,7 @@ export default function App() {
   const structureMutatingRef = useRef(false);
   const versionMutatingRef = useRef(false);
   const reviewingRef = useRef(false);
+  const reviewKindRef = useRef<'chapter' | 'golden-three' | null>(null);
   const reviewRequestRunningRef = useRef(false);
   const reviewRequestGate = useRef(createLatestAbortGate()).current;
   const reviewOperationRef = useRef<Promise<unknown> | null>(null);
@@ -744,6 +139,7 @@ export default function App() {
   };
 
   useBeforeUnloadWarning(shouldWarnBeforeUnloadForApp({
+    hasEditorDraft: hasDirtyDraft,
     creationPremiseDraft: creationPremiseDirty,
     whipDraft: whipDraftDirty,
     sectionPlanDraft: planOpen && Boolean(planText.trim()),
@@ -982,6 +378,7 @@ export default function App() {
   };
   const syncReviewRunning = () => {
     const running = reviewRequestRunningRef.current || reviewStoppingRef.current;
+    if (!running) reviewKindRef.current = null;
     reviewingRef.current = running;
     setReviewing(running);
   };
@@ -1433,6 +830,35 @@ export default function App() {
       '✓ 平台核对记录已删除',
     );
 
+  const doSaveChapterPlan = async (
+    plan: ChapterPlanInput, expectedRevision: string,
+  ): Promise<ChapterPlan> => {
+    if (selection.kind !== 'chapter' || !activeChapter) {
+      throw new Error('章节已经切换，请重新打开后保存策划卡');
+    }
+    const target = selection;
+    return saveChapterPlanWithReconciliation({
+      save: () => api.saveChapterPlan(
+        bookId, target.sectionId, target.chapterId, plan, expectedRevision,
+      ),
+      refresh: () => reload(bookId, target),
+      isConflict: (error) => api.isApiErrorCode(error, 'CHAPTER_PLAN_CONFLICT')
+        || api.isApiErrorCode(error, 'CHAPTER_PLAN_QUALITY_DOWNGRADE')
+        || api.isApiErrorCode(error, 'CHAPTER_PLAN_RHYTHM_DOWNGRADE'),
+      onConflict: () => toast.error('策划卡已被另一页面修改；已刷新最新版本，本地草稿仍保留，请核对后重试'),
+      onConflictRefreshFailure: () => toast.error('策划卡已被另一页面修改，且最新版本刷新失败；本地草稿仍保留'),
+      onAmbiguous: () => toast.error('策划卡保存结果未确认，已刷新磁盘实际状态；本地草稿仍保留'),
+      onAmbiguousRefreshFailure: () => toast.error('策划卡保存结果未确认且刷新失败；本地草稿仍保留，请返回书架确认'),
+      onSaved: (saved) => setLoadedChapter((current) => current?.sectionId === target.sectionId
+        && current.chapter.id === target.chapterId
+        ? { ...current, chapter: { ...current.chapter, plan: saved,
+          review: undefined, reviewContextRevision: undefined } }
+        : current),
+      onRefreshFailure: () => toast.error('策划卡已保存，但章节上下文刷新失败；请重新打开本章后再生成或审稿'),
+      onSuccess: () => toast.success('✓ 章节策划卡已保存，生成与审稿将使用新意图'),
+    });
+  };
+
   const doPublishChapter = async () => {
     if (selection.kind !== 'chapter' || !activeChapter) return;
     if (blockDirtyDraftAction()) return;
@@ -1579,6 +1005,8 @@ export default function App() {
           chapterId,
           mode: 'rewrite',
           expectedRevision: versionedForPath(path).revision,
+          // 策划留白不再阻断生成：服务端会把作者未决的判断作为上下文交给模型。
+          // 策划卡上的写前门槛继续显示，由作者决定是否先补齐。
         }, {
           onDelta: (d) => { if (ownsStreaming(token)) setStreamingText((t) => t + d); },
           onSaved: () => {
@@ -1634,31 +1062,24 @@ export default function App() {
     });
   };
 
-  // —— 章节推进（下一章 / 抽打）——
-  const runChapter = (mode: 'next' | 'whip', whip?: string) => {
-    const submittedWhipDraft = mode === 'whip'
-      && isSubmittedWhipDraft(whipDraftRef.current, whip ?? '');
+  // 下一章先走策划门槛；这里仅处理已有正文的定向抽打。
+  const runChapterWhip = (whip: string) => {
+    const submittedWhipDraft = isSubmittedWhipDraft(whipDraftRef.current, whip);
     if (blockDirtyDraftAction({ allowWhipDraft: submittedWhipDraft })) return false;
-    const sectionId = selection.kind === 'chapter' ? selection.sectionId : tree.sections[0]?.id;
-    if (!sectionId) { toast.error('请先新建一个部'); return false; }
-    const chapterId = selection.kind === 'chapter' ? selection.chapterId : undefined;
-    const expectedLastChapterId = mode === 'next'
-      ? lastChapterIdForSection(tree, sectionId)
-      : undefined;
+    if (selection.kind !== 'chapter' || !activeChapter) return false;
+    const { sectionId, chapterId } = selection;
     return startStreaming((token) => {
       setStreamingText(''); setStreamingPath('chapter');
-      setStatusText(mode === 'whip' ? '🗯️ 正在按你的要求重写…' : '✍️ 正在写下一章…');
-      const expectedRevision = mode === 'whip' && selection.kind === 'chapter'
-        ? activeChapter?.body.revision
-        : undefined;
+      setStatusText('🗯️ 正在按你的要求重写…');
       streamHandleRef.current = api.streamGen('/api/gen/chapter', {
-        bookId, sectionId, chapterId, mode, whip, expectedRevision, expectedLastChapterId,
+        bookId, sectionId, chapterId, mode: 'whip', whip,
+        expectedRevision: activeChapter.body.revision,
       }, {
         onDelta: (d) => { if (ownsStreaming(token)) setStreamingText((t) => t + d); },
         onSaved: (e) => {
           if (!ownsStreaming(token)) return;
           savedSelectionRef.current = { kind: 'chapter', sectionId, chapterId: e.chapterId ?? chapterId! };
-          if (submittedWhipDraft && isSubmittedWhipDraft(whipDraftRef.current, whip ?? '')) {
+          if (submittedWhipDraft && isSubmittedWhipDraft(whipDraftRef.current, whip)) {
             updateWhipDraft('');
           }
           setStatusText('🧾 正文已保存，正在整理摘要与审稿…');
@@ -1682,47 +1103,28 @@ export default function App() {
     });
   };
 
-  // —— 手动审稿 ——
-  const doReview = async () => {
-    if (selection.kind !== 'chapter') return;
+  const runReviewRequest = async (
+    kind: 'chapter' | 'golden-three', request: (signal: AbortSignal) => Promise<unknown>,
+  ) => {
     if (blockDirtyDraftAction()) return;
-    if (!activeChapter?.bodyFingerprint || !activeChapter.reviewContextRevision) {
-      toast.error('页面缺少有效的审稿版本标识，请刷新章节后重试');
-      return;
-    }
-    const { sectionId, chapterId } = selection;
-    const expectedBodyFingerprint = activeChapter.bodyFingerprint;
-    const expectedContextRevision = activeChapter.reviewContextRevision;
+    const reviewedSelection = selection;
     const operation = runExclusiveAction({
       isRunning: () => reviewingRef.current || isGenerationBusy() || versionMutatingRef.current
         || structureMutatingRef.current || planAdoptingRef.current,
-      setRunning: setReviewRequestRunning,
+      setRunning: (running) => {
+        if (running) reviewKindRef.current = kind;
+        setReviewRequestRunning(running);
+      },
       task: async () => {
-        const { token, signal } = reviewRequestGate.begin();
-        try {
-          await api.reviewChapter(
-            bookId, sectionId, chapterId,
-            expectedBodyFingerprint, expectedContextRevision, signal,
-          );
-        } catch (e) {
-          if (signal.aborted || !reviewRequestGate.owns(token)) return;
-          const reconciled = await reconcilePersistedMutationFailure({
-            error: e,
-            refresh: () => reload(bookId, selection),
-          });
-          if (!reviewRequestGate.owns(token)) return;
-          if (reconciled === 'refreshed') {
-            toast.error('审稿结果未确认，已刷新实际审稿结果；请确认后再决定是否重试');
-          } else if (reconciled === 'unknown') {
-            toast.error('审稿结果未确认且刷新失败；请返回书架确认');
-          } else toast.error('审稿失败：' + messageOf(e));
-          return;
-        }
-        if (signal.aborted || !reviewRequestGate.owns(token)) return;
-        const refreshError = await refreshPersistedChange(() => reload(bookId, selection));
-        if (!reviewRequestGate.owns(token)) return;
-        if (refreshError) toast.error('审稿已保存，但页面刷新失败：' + messageOf(refreshError));
-        else toast.success('✓ 审稿完成');
+        const result = await runPersistedReviewRequest({
+          begin: () => reviewRequestGate.begin(), owns: (token) => reviewRequestGate.owns(token),
+          request, refresh: () => reload(bookId, reviewedSelection),
+        });
+        if (result.status === 'refreshed') toast.error('审稿结果未确认，已刷新实际审稿结果；请确认后再决定是否重试');
+        else if (result.status === 'unknown') toast.error('审稿结果未确认且刷新失败；请返回书架确认');
+        else if (result.status === 'failed') toast.error('审稿失败：' + messageOf(result.error));
+        else if (result.status === 'saved-refresh-failed') toast.error('审稿已保存，但页面刷新失败：' + messageOf(result.error));
+        else if (result.status === 'saved') toast.success('✓ 审稿完成');
       },
     });
     reviewOperationRef.current = operation;
@@ -1731,8 +1133,30 @@ export default function App() {
       if (reviewOperationRef.current === operation) reviewOperationRef.current = null;
     }
   };
+  // —— 单章 / 黄金三章审稿共享同一个可停止互斥通道 ——
+  const doReview = async () => {
+    if (selection.kind !== 'chapter' || !activeChapter?.bodyFingerprint
+      || !activeChapter.reviewContextRevision) {
+      toast.error('页面缺少有效的审稿版本标识，请刷新章节后重试');
+      return;
+    }
+    const { sectionId, chapterId } = selection;
+    await runReviewRequest('chapter', (signal) => api.reviewChapter(
+      bookId, sectionId, chapterId, activeChapter.bodyFingerprint,
+      activeChapter.reviewContextRevision!, signal,
+    ));
+  };
+  const doGoldenThreeReview = async () => {
+    const state = activeChapter?.goldenThreeReviewState;
+    if (!state?.ready || !state.contextRevision) {
+      toast.error('前三章正文尚未齐备，或页面缺少联合审稿版本；请刷新第三章后重试');
+      return;
+    }
+    await runReviewRequest('golden-three', (signal) =>
+      api.reviewGoldenThree(bookId, state.contextRevision!, signal));
+  };
   const onUseSuggestion = (instruction: string) => {
-    runChapter('whip', instruction);
+    runChapterWhip(instruction);
   };
 
   // AI 规划分部
@@ -1841,6 +1265,46 @@ export default function App() {
     return operation;
   };
 
+  const addPlanningChapter = async (sid: string) => {
+    if (blockDirtyDraftAction()) return;
+    await runExclusiveAction({
+      isRunning: () => structureMutatingRef.current || isGenerationBusy() || reviewingRef.current
+        || versionMutatingRef.current || planAdoptingRef.current,
+      setRunning: setStructureMutationRunning,
+      task: async () => {
+        const result = await runPersistedCreation({
+          create: () => api.addChapter(
+            bookId, sid, undefined, lastChapterIdForSection(tree, sid),
+          ),
+          refreshAfterFailure: () => reload(bookId),
+          refreshAfterSuccess: (chapter) => reload(bookId, {
+            kind: 'chapter', sectionId: sid, chapterId: chapter.id,
+          }),
+        });
+        if (result.status === 'failed') {
+          const { error, reconciliation } = result;
+          if (reconciliation === 'conflict') {
+            toast.error('另一页面已经新增章节；已刷新侧栏，本次新建未执行');
+          } else if (reconciliation === 'conflict_refresh_failed') {
+            toast.error('另一页面已经新增章节，但侧栏刷新失败；本次新建未执行，请返回书架确认');
+          } else if (reconciliation === 'recovered') {
+            toast.error('已完成此前中断的章节事务并刷新侧栏；本次新建未执行，请检查后再操作');
+          } else if (reconciliation === 'recovered_refresh_failed') {
+            toast.error('已完成此前中断的章节事务，但侧栏刷新失败；本次新建未执行，请返回书架确认');
+          } else if (reconciliation === 'refreshed') {
+            toast.error('新建章结果未确认，已刷新本地数据；请先检查侧栏，再决定是否重试');
+          } else if (reconciliation === 'unknown') {
+            toast.error('新建章结果未确认且刷新失败；请返回书架确认后再重试');
+          } else toast.error('新建章失败：' + messageOf(error));
+          return;
+        }
+        if (result.refreshError) {
+          toast.error('章节已创建，但页面刷新失败：' + messageOf(result.refreshError));
+        } else toast.success('✓ 已建立下一章；先完成策划门槛，再生成正文');
+      },
+    });
+  };
+
   return (
     <div className="app">
       <TopBar title={tree.book.title} streaming={generationBusy}
@@ -1859,80 +1323,37 @@ export default function App() {
                 || versionMutatingRef.current || planAdoptingRef.current,
               setRunning: setStructureMutationRunning,
               task: async () => {
-                try {
-                  await api.addSection(
+                const result = await runPersistedCreation({
+                  create: () => api.addSection(
                     bookId, undefined, undefined, lastSectionIdForBook(tree),
-                  );
-                }
-                catch (e) {
-                  const reconciled = await reconcilePersistedMutationFailure({
-                    error: e,
-                    refresh: () => reload(bookId),
-                  });
-                  if (reconciled === 'conflict') {
+                  ),
+                  refreshAfterFailure: () => reload(bookId),
+                  refreshAfterSuccess: () => reload(bookId),
+                });
+                if (result.status === 'failed') {
+                  const { error, reconciliation } = result;
+                  if (reconciliation === 'conflict') {
                     toast.error('另一页面已经新增分部；已刷新侧栏，本次新建未执行');
-                  } else if (reconciled === 'conflict_refresh_failed') {
+                  } else if (reconciliation === 'conflict_refresh_failed') {
                     toast.error('另一页面已经新增分部，但侧栏刷新失败；本次新建未执行，请返回书架确认');
-                  } else if (reconciled === 'recovered') {
+                  } else if (reconciliation === 'recovered') {
                     toast.error('已完成此前中断的分部事务并刷新侧栏；本次新建未执行，请检查后再操作');
-                  } else if (reconciled === 'recovered_refresh_failed') {
+                  } else if (reconciliation === 'recovered_refresh_failed') {
                     toast.error('已完成此前中断的分部事务，但侧栏刷新失败；本次新建未执行，请返回书架确认');
-                  } else if (reconciled === 'refreshed') {
+                  } else if (reconciliation === 'refreshed') {
                     toast.error('新建部结果未确认，已刷新本地数据；请先检查侧栏，再决定是否重试');
-                  } else if (reconciled === 'unknown') {
+                  } else if (reconciliation === 'unknown') {
                     toast.error('新建部结果未确认且刷新失败；请返回书架确认后再重试');
-                  } else toast.error('新建部失败：' + messageOf(e));
+                  } else toast.error('新建部失败：' + messageOf(error));
                   return;
                 }
-                const refreshError = await refreshPersistedChange(() => reload(bookId));
-                if (refreshError) {
-                  toast.error('分部已创建，但侧栏刷新失败：' + messageOf(refreshError));
+                if (result.refreshError) {
+                  toast.error('分部已创建，但侧栏刷新失败：' + messageOf(result.refreshError));
                 }
               },
             });
           }}
-          onAddChapter={async (sid) => {
-            if (blockDirtyDraftAction()) return;
-            await runExclusiveAction({
-              isRunning: () => structureMutatingRef.current || isGenerationBusy() || reviewingRef.current
-                || versionMutatingRef.current || planAdoptingRef.current,
-              setRunning: setStructureMutationRunning,
-              task: async () => {
-                let c;
-                try {
-                  c = await api.addChapter(
-                    bookId, sid, undefined, lastChapterIdForSection(tree, sid),
-                  );
-                }
-                catch (e) {
-                  const reconciled = await reconcilePersistedMutationFailure({
-                    error: e,
-                    refresh: () => reload(bookId),
-                  });
-                  if (reconciled === 'conflict') {
-                    toast.error('另一页面已经新增章节；已刷新侧栏，本次新建未执行');
-                  } else if (reconciled === 'conflict_refresh_failed') {
-                    toast.error('另一页面已经新增章节，但侧栏刷新失败；本次新建未执行，请返回书架确认');
-                  } else if (reconciled === 'recovered') {
-                    toast.error('已完成此前中断的章节事务并刷新侧栏；本次新建未执行，请检查后再操作');
-                  } else if (reconciled === 'recovered_refresh_failed') {
-                    toast.error('已完成此前中断的章节事务，但侧栏刷新失败；本次新建未执行，请返回书架确认');
-                  } else if (reconciled === 'refreshed') {
-                    toast.error('新建章结果未确认，已刷新本地数据；请先检查侧栏，再决定是否重试');
-                  } else if (reconciled === 'unknown') {
-                    toast.error('新建章结果未确认且刷新失败；请返回书架确认后再重试');
-                  } else toast.error('新建章失败：' + messageOf(e));
-                  return;
-                }
-                const refreshError = await refreshPersistedChange(() => reload(
-                  bookId, { kind: 'chapter', sectionId: sid, chapterId: c.id },
-                ));
-                if (refreshError) {
-                  toast.error('章节已创建，但侧栏刷新失败：' + messageOf(refreshError));
-                }
-              },
-            });
-          }}
+          onAddChapter={addPlanningChapter}
           onPlanSections={runSections} />
         <div className="content">
           <MainPanel tree={tree} selection={selection} chapter={activeChapter} chapterLoading={chapterLoading}
@@ -1941,8 +1362,10 @@ export default function App() {
             streamingText={streamingText} streamingPath={streamingPath}
             onMove={doMove} onRewrite={doRewrite} onClear={doClear} onSave={doSave} onStop={stopGen}
             onDraftDirtyChange={updateDraftDirty}
-            reviewing={reviewing} reviewDisabled={hasAnyLocalDraft || generationBusy || versionMutating || structureMutating || planAdopting || chapterLoading || !activeChapter}
-            onReview={doReview} onStopReview={stopReview} onUseSuggestion={onUseSuggestion}
+            onSaveChapterPlan={doSaveChapterPlan}
+            onRefreshBook={() => reload(bookId, selection)}
+            reviewing={reviewing} reviewKind={reviewKindRef.current} reviewDisabled={hasAnyLocalDraft || generationBusy || versionMutating || structureMutating || planAdopting || chapterLoading || !activeChapter}
+            onReview={doReview} onGoldenThreeReview={doGoldenThreeReview} onStopReview={stopReview} onUseSuggestion={onUseSuggestion}
             publishing={versionMutating && !memoryRecomputing} onPublishChapter={doPublishChapter}
             memoryRecomputing={memoryRecomputing} onRecomputeMemory={doRecomputeMemory}
             onSaveDailyWordGoal={doSaveDailyWordGoal}
@@ -1959,8 +1382,8 @@ export default function App() {
               whip={whipDraft} onWhipChange={updateWhipDraft}
               onNext={() => existingNextChapter
                 ? selectWorkspace(existingNextChapter)
-                : runChapter('next')}
-              onWhip={(t) => runChapter('whip', t)} onStop={stopGen} />}
+                : void addPlanningChapter(selection.sectionId)}
+              onWhip={runChapterWhip} onStop={stopGen} />}
         </div>
       </div>
       {planOpen && <SectionPlanPanel text={planText} titles={planTitles} plans={planSections} streaming={generationBusy} adopting={planAdopting} parseError={planParseError}

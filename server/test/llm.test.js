@@ -780,6 +780,34 @@ test('extractDigest 解析当前 characters 人物快照字段', () => {
   assert.equal(d.digestCharactersParsed, true);
 });
 
+test('extractDigest 提取只锚定正文末态的跨章交接快照', () => {
+  const d = extractDigest(JSON.stringify({
+    summary: '主角逃到码头', progress: '沿水路追查', characters: [],
+    handoff: {
+      viewpoint: '林越', time: '暴雨当夜', location: '码头号棚',
+      ongoingAction: '正把账册递给旧敌', immediatePressure: '追兵已封锁出口',
+      characterState: '林越左臂受伤，旧敌尚未表态', resourceState: '账册在林越手中',
+      knowledgeBoundary: '林越只知账册被篡改，不知操作者',
+      unresolvedCausality: '交出账册将决定旧敌是否帮他破围',
+    },
+  }));
+  assert.equal(d.digestHandoffParsed, true);
+  assert.equal(d.handoff.location, '码头号棚');
+  assert.equal(d.handoff.resourceState, '账册在林越手中');
+});
+
+test('extractDigest 旧模型缺交接快照时保持兼容，非法快照不污染其它摘要', () => {
+  const legacy = extractDigest('{"summary":"S","progress":"P","characters":[]}');
+  assert.equal(legacy.digestHandoffParsed, false);
+  assert.equal(legacy.handoff.location, '');
+  const malformed = extractDigest(JSON.stringify({
+    summary: 'S', progress: 'P', characters: [], handoff: { location: 42 },
+  }));
+  assert.equal(malformed.summary, 'S');
+  assert.equal(malformed.digestHandoffParsed, false);
+  assert.equal(malformed.handoff.location, '');
+});
+
 test('extractDigest 合法 JSON 缺少人物字段时标记为不完整', () => {
   const d = extractDigest('{"summary":"S","progress":"P"}');
   assert.deepEqual(d.newCharacters, []);
@@ -804,7 +832,10 @@ test('extractDigest 无法解析时返回空结构', () => {
   const d = extractDigest('抱歉我不会');
   assert.deepEqual(d, {
     chapterTitle: '', sectionTitle: '',
-    summary: '', progress: '', newCharacters: [], memoryCandidates: [],
+    summary: '', progress: '', handoff: {
+      viewpoint: '', time: '', location: '', ongoingAction: '', immediatePressure: '',
+      characterState: '', resourceState: '', knowledgeBoundary: '', unresolvedCausality: '',
+    }, newCharacters: [], memoryCandidates: [],
   });
   assert.equal(d.digestParsed, false);
   assert.equal(d.digestCharactersParsed, false);
@@ -839,7 +870,8 @@ test('extractDigest 解析并清洗章名部名', () => {
 
 const reviewCheckIds = [
   'goldenChapter', 'premisePromise', 'chapterGoal', 'obstacleEscalation',
-  'characterChoice', 'effectiveIncrement', 'payoff', 'endingHook',
+  'characterChoice', 'sceneExecution', 'effectiveIncrement', 'payoff', 'endingHook',
+  'tensionDynamics', 'foreshadowingExecution', 'worldExpansion', 'proseHumanity',
   'expressionBalance', 'repetitionRisk', 'longArcProgress', 'styleConsistency',
   'packagingPromise',
   'contentRisk',
@@ -850,6 +882,10 @@ const reviewCheckPayload = (overrides = {}) => reviewCheckIds.map((id) => ({
   detail: `${id} 的正文依据`,
   ...(overrides[id] ?? {}),
 }));
+const rhythmFingerprint = {
+  pressurePattern: 'false-relief', resolutionMethod: 'wit', payoffScale: 'chapter',
+  hookMechanism: 'new-information', costType: 'identity',
+};
 
 test('extractChapterReview 直接解析合法 JSON', () => {
   const r = extractChapterReview('{"score":78,"verdict":"冲突成立","issues":[{"title":"冲突弱","detail":"缺少导火索"}],"suggestions":[{"label":"强化冲突","instruction":"加导火索"}]}');
@@ -861,13 +897,46 @@ test('extractChapterReview 直接解析合法 JSON', () => {
   assert.equal(r.suggestions[0].label, '强化冲突');
 });
 
+test('extractChapterReview 有策划时要求逐项差异并只带入未决项', () => {
+  const chapterPlan = {
+    goal: '拿回账本', obstacle: '', choice: '', payoff: '揭露内鬼',
+    hook: '', notes: '', scenes: [],
+  };
+  const payload = {
+    score: 72, verdict: '目标部分落地',
+    issues: [{ title: '兑现延后', detail: '内鬼尚未揭示' }],
+    suggestions: [{ label: '补兑现', instruction: '在结尾给出内鬼证据' }],
+    planComparison: {
+      overall: 'partial', summary: '账本已拿回，内鬼仍未揭示。',
+      items: [
+        { target: 'goal', outcome: 'fulfilled', evidence: '主角从仓库拿回账本。' },
+        { target: 'payoff', outcome: 'missed', evidence: '正文只写到一枚模糊印章。' },
+      ],
+      carryovers: [{
+        sourceTarget: 'payoff', text: '核对印章并锁定内鬼',
+        reason: '本章已建立证据但未完成揭示。', suggestedField: 'goal',
+      }],
+    },
+  };
+  const parsed = extractChapterReview(JSON.stringify(payload), { chapterPlan });
+  assert.equal(parsed.planComparison.items.length, 2);
+  assert.equal(parsed.planComparison.carryovers[0].suggestedField, 'goal');
+  assert.equal(extractChapterReview(JSON.stringify({
+    ...payload, planComparison: undefined,
+  }), { chapterPlan }), null);
+  assert.equal(extractChapterReview(JSON.stringify({
+    ...payload,
+    planComparison: { ...payload.planComparison, items: payload.planComparison.items.slice(1) },
+  }), { chapterPlan }), null);
+});
+
 test('extractChapterReview 清洗并保留完整网文章法检查表', () => {
   const r = extractChapterReview(JSON.stringify({
     score: 78,
     verdict: '冲突成立',
     webFictionSignals: {
       chapterFunction: '阶段兑现', conflictType: '身份对抗', emotionTone: '紧张',
-      payoffType: '真相揭示', dominantMode: '行动',
+      payoffType: '真相揭示', dominantMode: '行动', rhythmFingerprint,
     },
     webFictionChecks: reviewCheckPayload({
       goldenChapter: { status: 'na', detail: '非全书前三章' },
@@ -877,12 +946,13 @@ test('extractChapterReview 清洗并保留完整网文章法检查表', () => {
     suggestions: [{ label: '强化冲突', instruction: '加导火索' }],
   }));
 
-  assert.equal(r.webFictionChecks.length, 14);
+  assert.equal(r.webFictionChecks.length, 19);
   assert.deepEqual(r.webFictionChecks[0], {
     id: 'goldenChapter', status: 'na', detail: '非全书前三章',
   });
-  assert.equal(r.webFictionChecks[7].id, 'endingHook');
-  assert.equal(r.webFictionChecks[7].status, 'risk');
+  assert.equal(r.webFictionChecks[8].id, 'endingHook');
+  assert.equal(r.webFictionChecks[8].status, 'risk');
+  assert.equal(r.webFictionChecks[9].id, 'tensionDynamics');
   assert.equal(r.webFictionSignals.payoffType, '真相揭示');
 });
 
@@ -903,10 +973,62 @@ test('extractChapterReview 要求节奏信号字段完整并限制长度', () =>
     ...base,
     webFictionSignals: {
       chapterFunction: '推'.repeat(100), conflictType: '争执', emotionTone: '紧张',
-      payoffType: '信息', dominantMode: '对话',
+      payoffType: '信息', dominantMode: '对话', rhythmFingerprint,
     },
   }));
   assert.equal(parsed.webFictionSignals.chapterFunction.length, 40);
+  assert.equal(parsed.webFictionSignals.rhythmFingerprint.hookMechanism, 'new-information');
+  assert.equal(extractChapterReview(JSON.stringify({
+    ...base,
+    webFictionSignals: {
+      chapterFunction: '推进', conflictType: '争执', emotionTone: '紧张',
+      payoffType: '信息', dominantMode: '对话',
+      rhythmFingerprint: { ...rhythmFingerprint, costType: 'free-lunch' },
+    },
+  })), null);
+});
+
+test('extractChapterReview 核对写前节奏意图与正文实际指纹', () => {
+  const chapterPlan = {
+    rhythmIntentVersion: 1,
+    rhythmIntent: rhythmFingerprint,
+  };
+  const base = {
+    score: 80, verdict: '节奏意图落地',
+    issues: [{ title: '局部拖沓', detail: '中段说明略长' }],
+    suggestions: [{ label: '压缩说明', instruction: '压缩中段重复解释' }],
+    webFictionSignals: {
+      chapterFunction: '兑现', conflictType: '身份对抗', emotionTone: '紧张',
+      payoffType: '揭示', dominantMode: '行动', rhythmFingerprint,
+    },
+    planComparison: {
+      overall: 'aligned', summary: '写前节奏意图按计划落地。',
+      items: [{
+        target: 'rhythmIntent', outcome: 'fulfilled', evidence: '假放行后身份核验反噬。',
+      }], carryovers: [],
+    },
+  };
+  assert.ok(extractChapterReview(JSON.stringify(base), { chapterPlan }));
+  assert.equal(extractChapterReview(JSON.stringify({
+    ...base,
+    planComparison: {
+      ...base.planComparison,
+      items: [{ ...base.planComparison.items[0], outcome: 'adapted' }],
+    },
+  }), { chapterPlan }), null);
+  assert.ok(extractChapterReview(JSON.stringify({
+    ...base,
+    webFictionSignals: {
+      ...base.webFictionSignals,
+      rhythmFingerprint: { ...rhythmFingerprint, resolutionMethod: 'cooperation' },
+    },
+    planComparison: {
+      overall: 'adapted', summary: '人物临场协作形成合理改写。',
+      items: [{
+        target: 'rhythmIntent', outcome: 'adapted', evidence: '主角与旧友临时协作破局。',
+      }], carryovers: [],
+    },
+  }), { chapterPlan }));
 });
 
 test('extractChapterReview 拒绝缺项、重复 id 或非法状态的检查表', () => {
@@ -950,9 +1072,36 @@ test('extractChapterReview 截断检查依据且兼容没有检查表的旧审�
   }));
   assert.equal(Object.hasOwn(legacy, 'webFictionChecks'), false);
 
+  const prePromptChecks = extractChapterReview(JSON.stringify({
+    score: 78, verdict: '旧十五项检查仍可读',
+    webFictionChecks: reviewCheckPayload().filter(
+      (item) => ![
+        'tensionDynamics', 'foreshadowingExecution', 'worldExpansion', 'proseHumanity',
+      ].includes(item.id),
+    ),
+    issues: [{ title: '问题', detail: '说明' }],
+    suggestions: [{ label: '修改', instruction: '具体修改' }],
+  }));
+  assert.equal(prePromptChecks.webFictionChecks.length, 15);
+
+  const oldQualityIds = [
+    'tensionDynamics', 'foreshadowingExecution', 'worldExpansion', 'proseHumanity',
+  ];
+  const preSceneChecks = extractChapterReview(JSON.stringify({
+    score: 78, verdict: '旧十四项检查仍可读',
+    webFictionChecks: reviewCheckPayload().filter(
+      (item) => ![...oldQualityIds, 'sceneExecution'].includes(item.id),
+    ),
+    issues: [{ title: '问题', detail: '说明' }],
+    suggestions: [{ label: '修改', instruction: '具体修改' }],
+  }));
+  assert.equal(preSceneChecks.webFictionChecks.length, 14);
+
   const previousChecks = extractChapterReview(JSON.stringify({
     score: 78, verdict: '旧十三项检查仍可读',
-    webFictionChecks: reviewCheckPayload().filter((item) => item.id !== 'contentRisk'),
+    webFictionChecks: reviewCheckPayload().filter(
+      (item) => ![...oldQualityIds, 'sceneExecution', 'contentRisk'].includes(item.id),
+    ),
     issues: [{ title: '问题', detail: '说明' }],
     suggestions: [{ label: '修改', instruction: '具体修改' }],
   }));
@@ -961,7 +1110,9 @@ test('extractChapterReview 截断检查依据且兼容没有检查表的旧审�
   const prePackagingChecks = extractChapterReview(JSON.stringify({
     score: 78, verdict: '旧十二项检查仍可读',
     webFictionChecks: reviewCheckPayload().filter(
-      (item) => !['contentRisk', 'packagingPromise'].includes(item.id),
+      (item) => ![
+        ...oldQualityIds, 'sceneExecution', 'contentRisk', 'packagingPromise',
+      ].includes(item.id),
     ),
     issues: [{ title: '问题', detail: '说明' }],
     suggestions: [{ label: '修改', instruction: '具体修改' }],
@@ -971,7 +1122,10 @@ test('extractChapterReview 截断检查依据且兼容没有检查表的旧审�
   const preStyleChecks = extractChapterReview(JSON.stringify({
     score: 78, verdict: '旧十一项检查仍可读',
     webFictionChecks: reviewCheckPayload().filter(
-      (item) => !['contentRisk', 'packagingPromise', 'styleConsistency'].includes(item.id),
+      (item) => ![
+        ...oldQualityIds, 'sceneExecution', 'contentRisk', 'packagingPromise',
+        'styleConsistency',
+      ].includes(item.id),
     ),
     issues: [{ title: '问题', detail: '说明' }],
     suggestions: [{ label: '修改', instruction: '具体修改' }],
@@ -981,7 +1135,10 @@ test('extractChapterReview 截断检查依据且兼容没有检查表的旧审�
   const legacyChecks = extractChapterReview(JSON.stringify({
     score: 78, verdict: '旧十项检查仍可读',
     webFictionChecks: reviewCheckPayload().filter(
-      (item) => !['contentRisk', 'packagingPromise', 'longArcProgress', 'styleConsistency'].includes(item.id),
+      (item) => ![
+        ...oldQualityIds, 'sceneExecution', 'contentRisk', 'packagingPromise',
+        'longArcProgress', 'styleConsistency',
+      ].includes(item.id),
     ),
     issues: [{ title: '问题', detail: '说明' }],
     suggestions: [{ label: '修改', instruction: '具体修改' }],
@@ -1178,7 +1335,10 @@ test('extractDigest 对大量未闭合大括号保持有界扫描', () => {
   const d = extractDigest('{'.repeat(MAX_LLM_OUTPUT_CHARS));
   assert.deepEqual(d, {
     chapterTitle: '', sectionTitle: '', summary: '', progress: '',
-    newCharacters: [], memoryCandidates: [],
+    handoff: {
+      viewpoint: '', time: '', location: '', ongoingAction: '', immediatePressure: '',
+      characterState: '', resourceState: '', knowledgeBoundary: '', unresolvedCausality: '',
+    }, newCharacters: [], memoryCandidates: [],
   });
 });
 

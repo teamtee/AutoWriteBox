@@ -28,9 +28,10 @@ const renderCard = (initialCandidates: MemoryCandidate[]) => renderToStaticMarku
 );
 
 describe('MemoryCandidateCard', () => {
-  it('明确说明 AI 候选需人工确认，并展示来源依据和操作', () => {
+  it('明确区分自动采纳和待确认候选，并展示来源依据和操作', () => {
     const html = renderCard([candidate('pending')]);
-    expect(html).toContain('AI 提取内容默认不是事实');
+    expect(html).toContain('最高重要度事实会自动采纳');
+    expect(html).toContain('其余仍需确认');
     expect(html).toContain('人物明确说明次数');
     expect(html).toContain('事件类型');
     expect(html).toContain('使用');
@@ -39,7 +40,7 @@ describe('MemoryCandidateCard', () => {
     expect(html).toContain('忽略候选');
   });
 
-  it('已处理候选只展示状态，不允许重复决定', () => {
+  it('人工确认和已失效候选只展示状态，不允许重复决定', () => {
     const html = renderCard([candidate('accepted'), {
       ...candidate('stale'), id: `memory_${'b'.repeat(32)}`,
     }]);
@@ -47,5 +48,15 @@ describe('MemoryCandidateCard', () => {
     expect(html).toContain('来源已失效');
     expect(html).not.toContain('确认事实');
     expect(html).not.toContain('忽略候选');
+  });
+
+  it('自动采纳候选展示别名和事后否决入口', () => {
+    const html = renderCard([{
+      ...candidate('accepted'), aliases: ['阿越', '回溯者'], autoAccepted: true,
+    }]);
+    expect(html).toContain('自动采纳');
+    expect(html).toContain('别名：阿越、回溯者');
+    expect(html).toContain('否决自动采纳');
+    expect(html).not.toContain('确认事实');
   });
 });

@@ -35,12 +35,25 @@ async function createPopulatedBook() {
   await store.versionSet(book.id, path, '第一版正文');
   await store.versionSet(book.id, path, '第二版正文');
   const current = await store.readChapter(book.id, section.id, chapter.id);
+  await store.applyChapterDigest(book.id, section.id, chapter.id, {
+    summary: '主角抵达旧桥', progress: '摘要模型建议继续追查',
+    handoff: {
+      viewpoint: '林越', time: '当夜', location: '旧桥', ongoingAction: '正追向桥下',
+      immediatePressure: '追兵逼近', characterState: '左臂受伤', resourceState: '钥匙在手',
+      knowledgeBoundary: '只知道目标经过旧桥', unresolvedCausality: '桥下传来落水声',
+    },
+    newCharacters: [],
+  }, { expectedBodyFingerprint: current.bodyFingerprint });
   await store.saveChapterReview(book.id, section.id, chapter.id, {
     score: 88,
     verdict: '可读',
     webFictionSignals: {
       chapterFunction: '阶段兑现', conflictType: '追逐', emotionTone: '紧张',
       payoffType: '脱险', dominantMode: '行动',
+      rhythmFingerprint: {
+        pressurePattern: 'false-relief', resolutionMethod: 'wit',
+        payoffScale: 'chapter', hookMechanism: 'new-threat', costType: 'identity',
+      },
     },
     webFictionChecks: [
       'goldenChapter', 'premisePromise', 'chapterGoal', 'obstacleEscalation',
@@ -178,10 +191,17 @@ test('书籍备份保留版本与审稿，导入生成新副本且不包含 API 
   assert.deepEqual(importedSection.chapters, [chapter.id]);
   assert.deepEqual(importedChapter.body.versions, ['', '第一版正文', '第二版正文']);
   assert.equal(store.currentText(importedChapter.body), '第二版正文');
+  assert.equal(backup.sections[0].chapters[0].handoff.location, '旧桥');
+  assert.equal(importedChapter.handoff.ongoingAction, '正追向桥下');
+  assert.equal(importedChapter.progress, '摘要模型建议继续追查');
   assert.equal(importedChapter.review.score, 88);
   assert.equal(importedChapter.review.webFictionChecks.length, 11);
   assert.equal(importedChapter.review.webFictionChecks[7].id, 'endingHook');
   assert.equal(importedChapter.review.webFictionSignals.payoffType, '脱险');
+  assert.equal(
+    importedChapter.review.webFictionSignals.rhythmFingerprint.pressurePattern,
+    'false-relief',
+  );
   assert.match(importedChapter.review.sourceContextRevision, /^[A-Za-z0-9_-]{43}$/);
   assert.equal(
     importedChapter.review.sourceContextRevision,
@@ -1384,150 +1404,4 @@ test('慢速上传只占上传槽，不阻塞已就绪的备份导出', async ()
   assert.match(exportRes.jsonValue?.downloadUrl || '', /^\/api\/backups\/download\//);
   assert.equal(importRes.jsonValue?.id, 'book-imported');
   await registry.clear();
-});
-
-test('备份 HTTP 导出可下载，导入后新增副本且错误始终返回 JSON', async () => {
-  await store.writeConfig({ apiKey: 'sk-never-export' });
-  const { book } = await createPopulatedBook();
-  const started = await startTestServer(createApp());
-  try {
-    const exported = await fetch(`${started.base}/api/books/${book.id}/backup`);
-    assert.equal(exported.status, 200);
-    assert.match(exported.headers.get('content-type') || '', /application\/json/);
-    assert.equal(
-      exported.headers.get('content-disposition'),
-      `attachment; filename="${book.id}.novelbox.json"`,
-    );
-    const bytes = await exported.text();
-    assert.doesNotMatch(bytes, /sk-never-export/);
-
-    const preparedResponse = await fetch(
-      `${started.base}/api/books/${book.id}/backup/prepare`,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
-    );
-    assert.equal(preparedResponse.status, 200);
-    const prepared = await preparedResponse.json();
-    assert.match(prepared.downloadUrl, /^\/api\/backups\/download\/[0-9a-f-]{36}$/i);
-    const preparedHead = await fetch(started.base + prepared.downloadUrl, { method: 'HEAD' });
-    assert.equal(preparedHead.status, 200);
-    assert.ok(Number(preparedHead.headers.get('content-length')) > 0);
-    assert.equal(
-      preparedHead.headers.get('content-disposition'),
-      `attachment; filename="${book.id}.novelbox.json"`,
-    );
-    const preparedDownload = await fetch(started.base + prepared.downloadUrl);
-    assert.equal(preparedDownload.status, 200);
-    const preparedBytes = await preparedDownload.text();
-    assert.doesNotMatch(preparedBytes, /sk-never-export/);
-    const preparedBackup = JSON.parse(preparedBytes);
-    assert.equal(preparedBackup.format, store.BOOK_BACKUP_FORMAT);
-    assert.equal(preparedBackup.book.id, book.id);
-    const repeatedDownload = await fetch(started.base + prepared.downloadUrl);
-    assert.equal(repeatedDownload.status, 404);
-    assert.deepEqual(await repeatedDownload.json(), { error: 'BACKUP_DOWNLOAD_NOT_FOUND' });
-
-    const manuscriptPrepared = await fetch(
-      `${started.base}/api/books/${book.id}/manuscript/prepare`,
-      {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: 'current' }),
-      },
-    );
-    assert.equal(manuscriptPrepared.status, 200);
-    const manuscriptInfo = await manuscriptPrepared.json();
-    assert.equal(manuscriptInfo.source, 'current');
-    assert.equal(manuscriptInfo.totalChapterCount, 1);
-    assert.equal(manuscriptInfo.exportedChapterCount, 1);
-    assert.equal(manuscriptInfo.skippedChapterCount, 0);
-    const manuscriptHead = await fetch(
-      started.base + manuscriptInfo.downloadUrl, { method: 'HEAD' },
-    );
-    assert.match(manuscriptHead.headers.get('content-type') || '', /text\/plain/);
-    assert.equal(
-      manuscriptHead.headers.get('content-disposition'),
-      `attachment; filename="${book.id}.current.txt"`,
-    );
-    const manuscriptDownload = await fetch(started.base + manuscriptInfo.downloadUrl);
-    assert.equal(manuscriptDownload.status, 200);
-    assert.match(manuscriptDownload.headers.get('content-type') || '', /text\/plain/);
-    const manuscriptText = await manuscriptDownload.text();
-    assert.match(manuscriptText, /可迁移小说/);
-    assert.match(manuscriptText, /第一章\n\n第二版正文/);
-    assert.doesNotMatch(manuscriptText, /备份测试|sk-never-export|webFictionChecks/);
-
-    const badManuscript = await fetch(
-      `${started.base}/api/books/${book.id}/manuscript/prepare`,
-      {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: 'unknown' }),
-      },
-    );
-    assert.equal(badManuscript.status, 400);
-    assert.deepEqual(await badManuscript.json(), { error: 'BAD_MANUSCRIPT_SOURCE' });
-
-    const tooLarge = await requestWithDeclaredLength(started.base, store.BOOK_BACKUP_MAX_BYTES + 1);
-    assert.equal(tooLarge.status, 413);
-    assert.equal(JSON.parse(tooLarge.body).error, 'BACKUP_TOO_LARGE');
-
-    const requestedBookId = `book_${'b'.repeat(32)}`;
-    const imported = await fetch(`${started.base}/api/backups/import`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'X-Novelbox-Book-Id': requestedBookId,
-      },
-      body: bytes,
-    });
-    assert.equal(imported.status, 200);
-    assert.equal((await imported.json()).id, requestedBookId);
-    assert.equal((await store.listBooks()).length, 2);
-
-    const collision = await fetch(`${started.base}/api/backups/import`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'X-Novelbox-Book-Id': requestedBookId,
-      },
-      body: bytes,
-    });
-    assert.equal(collision.status, 409);
-    assert.deepEqual(await collision.json(), { error: 'BOOK_ALREADY_EXISTS' });
-    assert.equal((await store.listBooks()).length, 2);
-
-    const invalidRequestedId = await fetch(`${started.base}/api/backups/import`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'X-Novelbox-Book-Id': '../escape',
-      },
-      body: bytes,
-    });
-    assert.equal(invalidRequestedId.status, 400);
-    assert.deepEqual(await invalidRequestedId.json(), { error: 'BAD_BOOK_CREATION_ID' });
-    assert.equal((await store.listBooks()).length, 2);
-
-    const malformed = await fetch(`${started.base}/api/backups/import`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: '{bad json',
-    });
-    assert.equal(malformed.status, 400);
-    assert.match(malformed.headers.get('content-type') || '', /application\/json/);
-    assert.equal((await malformed.json()).error, 'BACKUP_INVALID_JSON');
-    assert.equal((await store.listBooks()).length, 2);
-
-    const invalidBackup = JSON.parse(bytes);
-    invalidBackup.sections[0].section.chapters[0] = '../escape';
-    const invalid = await fetch(`${started.base}/api/backups/import`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: JSON.stringify(invalidBackup),
-    });
-    assert.equal(invalid.status, 400);
-    assert.equal((await invalid.json()).error, 'BACKUP_INVALID');
-    assert.equal((await store.listBooks()).length, 2);
-    assert.equal((await store.diagnoseStorage()).ok, true);
-  } finally {
-    await stopTestServer(started.server);
-  }
 });

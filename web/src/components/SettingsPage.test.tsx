@@ -14,6 +14,7 @@ const config = (model: string): Config => ({
   apiKey: 'sk-****',
   chapterWordTarget: 2000,
   requestTimeoutMs: 300000,
+  modelContextChars: 500000,
   revision: 'R'.repeat(43),
 });
 
@@ -24,7 +25,7 @@ describe('SettingsPage initial config loading', () => {
     );
 
     expect(html).toContain('正在读取已保存的设置');
-    expect(html.match(/<input[^>]*disabled=""/g)).toHaveLength(5);
+    expect(html.match(/<input[^>]*disabled=""/g)).toHaveLength(6);
     expect(html).toMatch(/<button type="submit" class="hbtn accent-2" disabled="">读取中…<\/button>/);
   });
 

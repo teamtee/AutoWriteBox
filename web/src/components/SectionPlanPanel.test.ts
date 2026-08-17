@@ -23,11 +23,24 @@ describe('sectionPlanOutline', () => {
       goal: '找到失踪证人', obstacle: '守夜人追杀', progress: '锁定幕后组织',
       climax: '钟楼对决', payoff: '救回证人并获得名单',
       stateChange: '主角身份暴露，盟友关系确立',
+      worldProgression: {
+        layer: '当前生活圈', stagePromise: '看见城市规则如何吞掉普通人',
+        evidence: '地下城通行牌会同时冻结住宿与补给',
+        characterAction: '主角主动用伪造通行牌寻找证人',
+        choiceAndCost: '主角保住证人但失去假身份',
+        knowledgeGain: '读者与主角确认失踪案由制度网络协同完成',
+        protectedUnknown: '仍不公开制度背后的上层组织',
+        gateOutcome: 'open-next', gateCondition: '拿到可跨区核验的组织名单',
+        gateProgress: '钟楼对决后主角拿到带外区印章的名单',
+      },
     });
     expect(outline).toContain('【阶段承诺 Promise】揭示城市暗面');
     expect(outline).toContain('【主线推进 Progress】锁定幕后组织');
     expect(outline).toContain('【阶段兑现 Payoff】救回证人并获得名单');
     expect(outline).toContain('【结束状态变化】主角身份暴露，盟友关系确立');
+    expect(outline).toContain('【世界层级】当前生活圈');
+    expect(outline).toContain('【可验证世界证据】地下城通行牌');
+    expect(outline).toContain('【门槛结果】本部完成门槛，下部进入下一层');
   });
 });
 

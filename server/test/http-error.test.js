@@ -71,6 +71,18 @@ test('业务错误保留语义化 HTTP 状态并可直接发送 JSON', () => {
   assert.deepEqual(publicHttpError(new Error('GENERATION_CONTEXT_CONFLICT')), {
     status: 409, error: 'GENERATION_CONTEXT_CONFLICT',
   });
+  assert.deepEqual(publicHttpError(new Error('CHAPTER_PLAN_QUALITY_DOWNGRADE')), {
+    status: 409, error: 'CHAPTER_PLAN_QUALITY_DOWNGRADE',
+  });
+  assert.deepEqual(publicHttpError(new Error('CHAPTER_PLAN_DESIGN_DOWNGRADE')), {
+    status: 409, error: 'CHAPTER_PLAN_DESIGN_DOWNGRADE',
+  });
+  assert.deepEqual(publicHttpError(new Error('CHAPTER_PLAN_RHYTHM_DOWNGRADE')), {
+    status: 409, error: 'CHAPTER_PLAN_RHYTHM_DOWNGRADE',
+  });
+  assert.deepEqual(publicHttpError(new Error('STYLE_BIBLE_FAILED')), {
+    status: 502, error: 'STYLE_BIBLE_FAILED',
+  });
   assert.deepEqual(publicHttpError(new Error('STRUCTURE_TRANSACTION_RECOVERED')), {
     status: 409, error: 'STRUCTURE_TRANSACTION_RECOVERED',
   });

@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20.x, 22.x]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Install backend dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Record and verify backend dependency contents
+        run: |
+          node server/launcher-preflight.js record-dependencies
+          node server/launcher-preflight.js dependencies
+
+      - name: Run backend tests
+        run: npm test
+
+      - name: Build frontend with the launcher's dependency policy
+        run: npm run build
+
+      - name: Verify launcher runtime preflight
+        run: node server/launcher-preflight.js runtime
+
+      - name: Run frontend tests
+        run: npm --prefix web test
+
+      - name: Audit backend production dependencies
+        run: npm audit --omit=dev
+
+      - name: Audit frontend dependencies
+        run: npm --prefix web audit

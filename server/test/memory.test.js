@@ -4,7 +4,9 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as store from '../store.js';
 import { buildContext } from '../prompts.js';
-import { generationMemoryRows } from '../generation-context.js';
+import {
+  generationChapterMemorySelection, generationMemoryRows, generationMemorySelection,
+} from '../generation-context.js';
 import { cleanupTestTempDirs, makeTestTempDir } from './test-temp-dir.js';
 
 let root;
@@ -29,6 +31,17 @@ const abilityCandidate = (object = '每天最多使用两次') => ({
     eventType: 'used', limitation: object, time: '当日', location: '北港钟楼',
   },
 });
+
+function activeMemoryFact(index, overrides = {}) {
+  return {
+    id: `fact-${index}`, kind: 'item', subject: `普通物品${index}`,
+    predicate: '当前状态', object: `完好且由守卫保管${index}`,
+    evidence: '历史正文证据', importance: 5, status: 'active',
+    source: { chapterIndex: index + 1 },
+    updatedAt: new Date(Date.UTC(2026, 0, Math.min(28, index + 1))).toISOString(),
+    ...overrides,
+  };
+}
 
 async function extractCandidates(target, candidates) {
   const chapter = await store.readChapter(
@@ -58,9 +71,55 @@ test('digest 只创建带正文指纹的待确认记忆候选', async () => {
   assert.doesNotMatch(buildContext({ book, section: {}, prevChapter: null }), /回溯使用上限/);
 });
 
+test('正文可精确定位的最高重要度候选自动进入事实库，并允许作者事后否决', async () => {
+  const target = await createChapterWithText('林越把青铜钥匙交给沈青，众人都看见了。');
+  await extractCandidates(target, [{
+    kind: 'item', subject: '青铜钥匙', predicate: '当前持有人', object: '沈青',
+    evidence: '交接发生在众人面前', importance: 5, aliases: ['旧城钥匙'],
+  }]);
+  let chapter = await store.readChapter(target.bookId, target.sectionId, target.chapterId);
+  let book = await store.readBook(target.bookId);
+  assert.equal(book.memory.facts.length, 1);
+  assert.equal(book.memory.facts[0].autoAccepted, true);
+  assert.equal(book.memory.facts[0].object, '沈青');
+  assert.deepEqual(book.memory.facts[0].aliases, ['旧城钥匙']);
+  assert.equal(store.chapterMemoryCandidatesView(book, chapter)[0].status, 'accepted');
+
+  const rejected = await store.decideMemoryCandidate(
+    target.bookId, target.sectionId, target.chapterId, chapter.memoryCandidates[0].id,
+    {
+      action: 'reject', expectedBodyFingerprint: chapter.bodyFingerprint,
+      expectedMemoryRevision: store.bookMemoryRevision(book),
+    },
+  );
+  assert.equal(rejected.candidate.status, 'rejected');
+  book = await store.readBook(target.bookId);
+  chapter = await store.readChapter(target.bookId, target.sectionId, target.chapterId);
+  assert.equal(book.memory.facts.length, 0);
+  assert.equal(store.chapterMemoryCandidatesView(book, chapter)[0].status, 'rejected');
+});
+
+test('低重要度或正文无法精确定位的候选继续等待人工确认', async () => {
+  const target = await createChapterWithText('林越看了一眼青铜钥匙。');
+  await extractCandidates(target, [{
+    kind: 'item', subject: '青铜钥匙', predicate: '当前持有人', object: '沈青',
+    evidence: '模型推断', importance: 4,
+  }, {
+    kind: 'item', subject: '青铜钥匙', predicate: '来源', object: '旧王陵深处',
+    evidence: '正文没有明确说明', importance: 5,
+  }]);
+  const chapter = await store.readChapter(target.bookId, target.sectionId, target.chapterId);
+  const book = await store.readBook(target.bookId);
+  assert.equal(book.memory.facts.length, 0);
+  assert.deepEqual(
+    store.chapterMemoryCandidatesView(book, chapter).map((item) => item.status),
+    ['pending', 'pending'],
+  );
+});
+
 test('人工确认后事实进入上下文并随单书备份保存', async () => {
   const target = await createChapterWithText();
-  await extractCandidates(target, [abilityCandidate()]);
+  await extractCandidates(target, [{ ...abilityCandidate(), aliases: ['阿越', '回溯者'] }]);
   let chapter = await store.readChapter(target.bookId, target.sectionId, target.chapterId);
   let book = await store.readBook(target.bookId);
   const candidate = chapter.memoryCandidates[0];
@@ -82,6 +141,7 @@ test('人工确认后事实进入上下文并随单书备份保存', async () =>
   assert.deepEqual(book.memory.facts[0].details, {
     eventType: 'used', limitation: '每天最多使用两次', time: '当日', location: '北港钟楼',
   });
+  assert.deepEqual(book.memory.facts[0].aliases, ['阿越', '回溯者']);
   assert.match(buildContext({ book, section: {}, prevChapter: null }), /回溯使用上限/);
   assert.match(buildContext({ book, section: {}, prevChapter: null }), /限制=每天最多使用两次/);
   assert.match(buildContext({ book, section: {}, prevChapter: null }), /地点=北港钟楼/);
@@ -90,6 +150,10 @@ test('人工确认后事实进入上下文并随单书备份保存', async () =>
   const backup = await store.createBookBackup(target.bookId);
   assert.equal(backup.book.memory.facts[0].id, candidate.id);
   assert.equal(backup.book.memory.facts[0].details.limitation, '每天最多使用两次');
+  assert.deepEqual(backup.book.memory.facts[0].aliases, ['阿越', '回溯者']);
+  assert.deepEqual(
+    backup.sections[0].chapters[0].memoryCandidates[0].aliases, ['阿越', '回溯者'],
+  );
   assert.equal(backup.sections[0].chapters[0].memoryCandidates[0].id, candidate.id);
 
   const imported = await store.importBookBackup(backup);
@@ -99,6 +163,7 @@ test('人工确认后事实进入上下文并随单书备份保存', async () =>
   );
   assert.equal(importedBook.memory.facts[0].status, 'active');
   assert.equal(importedBook.memory.facts[0].details.location, '北港钟楼');
+  assert.deepEqual(importedBook.memory.facts[0].aliases, ['阿越', '回溯者']);
   assert.equal(
     store.chapterMemoryCandidatesView(importedBook, importedChapter)[0].status,
     'accepted',
@@ -473,4 +538,126 @@ test('长期记忆上下文优先相关和高重要度事实并显式标记预�
   assert.match(rows[0], /林越/);
   assert.match(rows.at(-1), /预算省略/);
   assert.ok(rows.join('\n').length <= 300);
+});
+
+test('本章策划点名的久远低优先事实先于近期高优先事实进入 API 上下文', () => {
+  const facts = Array.from({ length: 30 }, (_, index) => activeMemoryFact(index));
+  facts.push(activeMemoryFact(99, {
+    id: 'fact-target', subject: '沉星钥匙', predicate: '真实限制',
+    object: '只能开启一次北境星门', importance: 1,
+    updatedAt: '2001-01-01T00:00:00.000Z', source: { chapterIndex: 3 },
+  }));
+
+  const selection = generationChapterMemorySelection({ facts }, {
+    book: {}, section: {}, prevChapter: null,
+    chapterPlan: { goal: '找回沉星钥匙并赶赴北境' }, maxChars: 260,
+  });
+
+  assert.match(selection.rows[0], /沉星钥匙.*只能开启一次北境星门/);
+  assert.equal(selection.taskRelevantCount, 1);
+  assert.equal(selection.selectedTaskRelevantCount, 1);
+  assert.equal(selection.truncated, true);
+  assert.ok(selection.omittedCount > 0);
+});
+
+test('待审正文直接提到的旧人物或物品也会触发任务级记忆召回', () => {
+  const facts = Array.from({ length: 25 }, (_, index) => activeMemoryFact(index));
+  facts.push(activeMemoryFact(88, {
+    id: 'fact-body-target', kind: 'foreshadow', subject: '断齿铜环',
+    predicate: '读者已知用途', object: '能辨认旧王庭密使', importance: 1,
+    updatedAt: '2002-01-01T00:00:00.000Z', source: { chapterIndex: 12 },
+  }));
+
+  const selection = generationChapterMemorySelection({ facts }, {
+    book: {}, section: {}, prevChapter: null,
+    currentContent: '他从尸体袖中摸出断齿铜环，却没有立刻声张。', maxChars: 260,
+  });
+
+  assert.match(selection.rows[0], /断齿铜环.*旧王庭密使/);
+  assert.equal(selection.selectedTaskRelevantCount, 1);
+});
+
+test('任务直接相关的长事实不会被无关短事实套利挤出预算', () => {
+  const facts = [activeMemoryFact(900, {
+    id: 'fact-long-target', subject: '青铜钥匙', predicate: '取得经过',
+    object: `由陆昭在第40章取得，${'关键细节'.repeat(100)}`,
+    importance: 5, updatedAt: '2001-01-01T00:00:00.000Z',
+  })];
+  for (let index = 0; index < 20; index += 1) {
+    facts.push(activeMemoryFact(index, {
+      subject: `路人${index}`, predicate: '位置', object: '站在街上', importance: 1,
+    }));
+  }
+
+  const selection = generationMemorySelection({ facts }, {
+    taskRelevantText: '本章陆昭要用青铜钥匙开门', maxChars: 200,
+  });
+
+  assert.equal(selection.taskRelevantCount, 1);
+  assert.equal(selection.selectedTaskRelevantCount, 1);
+  assert.match(selection.rows[0], /青铜钥匙/u);
+  assert.doesNotMatch(selection.rows[0], /路人/u);
+  assert.ok(selection.rows.join('\n').length <= 200);
+});
+
+test('单字主体不因普通词组误命中任务相关性', () => {
+  const selection = generationMemorySelection({ facts: [activeMemoryFact(1, {
+    subject: '火', predicate: '属于', object: '禁忌元素', importance: 5,
+  })] }, {
+    taskRelevantText: '本章主角在灯火通明的宴会上敬酒', maxChars: 300,
+  });
+  assert.equal(selection.taskRelevantCount, 0);
+  assert.equal(selection.selectedTaskRelevantCount, 0);
+});
+
+test('事实别名可以召回主体，并在发送行中明确标出同一实体', () => {
+  const selection = generationMemorySelection({ facts: [activeMemoryFact(1, {
+    subject: '陆昭', aliases: ['昭哥', '那个瞎子'],
+    predicate: '持有物', object: '青铜钥匙', importance: 3,
+  })] }, {
+    taskRelevantText: '昭哥把钥匙藏进袖口', maxChars: 300,
+  });
+  assert.equal(selection.taskRelevantCount, 1);
+  assert.equal(selection.selectedTaskRelevantCount, 1);
+  assert.match(selection.rows[0], /陆昭（别名：昭哥、那个瞎子）/u);
+});
+
+test('省略提示给出事实总数和仍未装入的任务相关数量', () => {
+  const facts = Array.from({ length: 20 }, (_, index) => activeMemoryFact(index, {
+    subject: `青铜钥匙${index}`, predicate: '状态', object: '关键事实'.repeat(30),
+  }));
+  const selection = generationMemorySelection({ facts }, {
+    taskRelevantText: facts.map((fact) => fact.subject).join('、'), maxChars: 120,
+  });
+  assert.ok(selection.omittedCount > 0);
+  assert.ok(selection.selectedTaskRelevantCount < selection.taskRelevantCount);
+  assert.match(selection.rows.at(-1), new RegExp(`另有 ${selection.omittedCount} 条`, 'u'));
+  assert.match(
+    selection.rows.at(-1),
+    new RegExp(`${selection.taskRelevantCount - selection.selectedTaskRelevantCount} 条与本章直接相关`, 'u'),
+  );
+});
+
+test('大型相关文本使用精确索引并正确匹配跨代理对的事实', () => {
+  const factCount = 10_000;
+  const facts = Array.from({ length: factCount }, (_, index) => ({
+    id: `memory_${index.toString(16).padStart(32, '0')}`,
+    kind: 'other',
+    subject: index === factCount - 1 ? '英雄😀' : `主体${index}`,
+    predicate: '状态',
+    object: `不会出现的对象${index}`,
+    importance: index === factCount - 1 ? 1 : 5,
+    status: 'active', source: { chapterIndex: index + 1 },
+    updatedAt: new Date(index * 1000).toISOString(),
+  }));
+  const relevantText = `${'无关上下文'.repeat(20_000)}英雄😀正在行动`;
+  const startedAt = performance.now();
+
+  const rows = generationMemoryRows({ facts }, { relevantText, maxChars: 300 });
+  const durationMs = performance.now() - startedAt;
+
+  assert.match(rows[0], /英雄😀/);
+  assert.match(rows.at(-1), /预算省略/);
+  assert.ok(rows.join('\n').length <= 300);
+  assert.ok(durationMs < 1_000, `大型记忆筛选耗时异常：${durationMs.toFixed(1)}ms`);
 });

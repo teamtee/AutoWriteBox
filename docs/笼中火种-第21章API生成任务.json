@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 2,
+  "kind": "api-editorial-loop-spec",
+  "status": "candidate-only",
+  "bookId": "book_8d9180a777eb60664f14bc8c4dd40e2c",
+  "bookTitle": "笼中火种",
+  "chapterIndex": 21,
+  "chapterTitle": "盒里的第二枚棋子",
+  "briefPath": "docs/笼中火种-第21章API创作任务书.md",
+  "planPath": "docs/笼中火种-第三阶段第21至30章策划候选.json",
+  "previousChapterPath": "docs/笼中火种-第20章零样本-正文候选.txt",
+  "contextPaths": [
+    "docs/笼中火种-第21至30章写前承诺账本.md",
+    "docs/笼中火种-第二循环第11至20章正文联合审读.md"
+  ],
+  "outputBasePath": "docs/api-generated/笼中火种-第21章盒里的第二枚棋子-API正文候选",
+  "minCharacters": 2600,
+  "maxCharacters": 3400,
+  "maxShortParagraphRatio": 0.25,
+  "minimumReviewScore": 85,
+  "maxIterations": 2
+}

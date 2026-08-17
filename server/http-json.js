@@ -46,8 +46,9 @@ function waitForDrain(response, signal, timeoutMs) {
     if (signal?.aborted || response.destroyed || response.writableEnded) onAbort();
     else if (!response.writableNeedDrain) finish();
     else {
+      // 背压超时负责结算当前调用返回的 Promise，不能 unref；否则在没有
+      // 其它活跃句柄时，Node 20 会直接结束事件循环并留下永久待决操作。
       timer = setTimeout(onTimeout, timeoutMs);
-      timer.unref?.();
     }
   });
 }

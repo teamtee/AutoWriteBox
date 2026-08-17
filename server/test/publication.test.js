@@ -12,7 +12,8 @@ afterEach(cleanupTestTempDirs);
 
 const reviewCheckIds = [
   'goldenChapter', 'premisePromise', 'chapterGoal', 'obstacleEscalation',
-  'characterChoice', 'effectiveIncrement', 'payoff', 'endingHook',
+  'characterChoice', 'sceneExecution', 'effectiveIncrement', 'payoff', 'endingHook',
+  'tensionDynamics', 'foreshadowingExecution', 'worldExpansion', 'proseHumanity',
   'expressionBalance', 'repetitionRisk', 'longArcProgress', 'styleConsistency',
   'packagingPromise', 'contentRisk',
 ];
@@ -83,6 +84,12 @@ test('发布前检查逐字复核整书重复，并汇总当前审稿与人工�
   assert.equal(preflight.checks.find((item) => item.id === 'endingHook').status, 'pass');
   assert.equal(preflight.checks.find((item) => item.id === 'contentRisk').status, 'risk');
   assert.equal(preflight.checks.find((item) => item.id === 'platformRules').status, 'manual');
+  // 体量与质感只报告可计算事实，短章标为待作者确认而不是风险，也不阻断发布。
+  const prose = preflight.checks.find((item) => item.id === 'prose');
+  assert.equal(prose.status, 'pending');
+  assert.match(prose.detail, /正文 \d+ 字符；最长连续叙述块 \d+ 字符；身体与感官锚点 [\d.]+ 处\/千字。/);
+  assert.match(prose.detail, /这些只是统计观察，是否需要调整由你判断。/);
+  assert.equal(/不合格|未达标|不得发布/.test(prose.detail), false);
   assert.match(
     preflight.checks.find((item) => item.id === 'platformRules').detail,
     /起点读书.*不会标记为已合规/,

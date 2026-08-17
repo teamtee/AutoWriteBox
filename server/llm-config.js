@@ -1,5 +1,7 @@
 import {
-  MAX_CONFIG_API_KEY_CHARS, MAX_CONFIG_BASE_URL_CHARS, MAX_CONFIG_MODEL_CHARS,
+  DEFAULT_MODEL_CONTEXT_CHARS, MAX_CONFIG_API_KEY_CHARS,
+  MAX_CONFIG_BASE_URL_CHARS, MAX_CONFIG_MODEL_CHARS, MAX_MODEL_CONTEXT_CHARS,
+  MIN_MODEL_CONTEXT_CHARS,
 } from './limits.js';
 import { isLoopbackHostname } from './request-security.js';
 
@@ -53,8 +55,14 @@ export function normalizeLlmConfig(config, { allowIncomplete = false } = {}) {
     }
   }
 
+  const modelContextChars = Number.isInteger(config?.modelContextChars)
+    && config.modelContextChars >= MIN_MODEL_CONTEXT_CHARS
+    && config.modelContextChars <= MAX_MODEL_CONTEXT_CHARS
+    ? config.modelContextChars : DEFAULT_MODEL_CONTEXT_CHARS;
+
   return {
     ...config,
+    modelContextChars,
     // 请求和落盘都使用同一个 WHATWG URL 规范化结果，避免反斜杠、默认端口
     // 或大小写等字符串差异在保存后和 fetch 时被重新解释。
     baseUrl: parsed ? parsed.href.replace(/\/$/u, '') : '',

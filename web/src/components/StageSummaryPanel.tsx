@@ -70,6 +70,7 @@ export function StageSummaryPanel({
   const rangeValid = startIndex >= 0 && endIndex >= startIndex
     && endIndex - startIndex + 1 <= MAX_STAGE_SECTIONS;
   const selected = editor ? items.find((item) => item.id === editor.id) : undefined;
+  const hasStaleFrozen = items.some((item) => item.status === 'frozen' && item.stale);
 
   const run = async (kind: 'save' | 'recompute', status: StageSummaryStatus = 'draft') => {
     if (!editor || busy || !rangeValid) return;
@@ -143,6 +144,9 @@ export function StageSummaryPanel({
         <span>第 {item.startSectionIndex}–{item.endSectionIndex} 部 · {item.status === 'frozen' ? '已冻结' : '草稿'}{item.stale ? ' · 来源已变化' : ''}</span>
       </button>)}
     </div>}
+    {hasStaleFrozen && !selected?.stale && <div className="memory-message" role="status">
+      有冻结阶段摘要的来源已经变化。生成时会同时携带当前分部摘要；两者冲突时以当前正文派生事实为准。请打开该阶段，按需解冻并重算。
+    </div>}
     {!items.length && !editor && <p className="empty-hint">尚无阶段摘要。建议每 3–5 个分部建立一份，校对后冻结。</p>}
     {editor && <div className="stage-summary-editor">
       <div className="stage-summary-fields">
@@ -160,7 +164,7 @@ export function StageSummaryPanel({
       {!rangeValid && <div className="memory-message error" role="alert">请选择不超过 20 个的连续分部，且结束不能早于起始。</div>}
       {selected?.stale && <div className="memory-message" role="status">
         来源分部摘要已变化。{selected.status === 'frozen'
-          ? '冻结版仍按作者确认继续使用；若要跟随新剧情，请先解冻再重算。'
+          ? '冻结版仍保留作者意图，但生成时会同时携带当前分部摘要；两者冲突时以当前正文派生事实为准。若要消除冲突，请先解冻再重算。'
           : '该草稿已退出生成上下文，请重算或人工修订。'}
       </div>}
       <label className="stage-summary-text">摘要正文<textarea maxLength={4000}
