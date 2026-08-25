@@ -4,6 +4,7 @@ import type {
   ChapterReviewRevisionVerificationResult,
 } from '../types';
 import { chapterRevisionCandidatePreview } from './ChapterRevisionPipelineCard';
+import { useDirtyReporter } from '../useDirtyReporter';
 
 const excludedAutomaticChecks = new Set(['contentRisk']);
 
@@ -81,8 +82,8 @@ export function ChapterReviewRevisionCard({
   latest.current = { bodyFingerprint, contextRevision, reviewRevision };
   const pending = generating || Boolean(candidate);
 
-  useEffect(() => onDirtyChange?.(pending), [pending, onDirtyChange]);
-  useEffect(() => () => { abortRef.current?.abort(); onDirtyChange?.(false); }, [onDirtyChange]);
+  useDirtyReporter(pending, onDirtyChange);
+  useEffect(() => () => { abortRef.current?.abort(); }, []);
   useEffect(() => {
     if (candidate && !reviewRevisionCandidateIsCurrent(
       candidate, bodyFingerprint, contextRevision, reviewRevision,

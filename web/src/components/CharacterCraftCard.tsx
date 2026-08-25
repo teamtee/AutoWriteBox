@@ -4,6 +4,7 @@ import type {
   CharacterCraft, CharacterGuide, CharacterGuideInput, RelationshipGuide,
   RelationshipGuideInput, RelationshipTemperatureChange,
 } from '../types';
+import { useDirtyReporter } from '../useDirtyReporter';
 
 type CraftKind = 'character' | 'relationship';
 type CraftInput = CharacterGuideInput | RelationshipGuideInput;
@@ -285,10 +286,7 @@ export function CharacterCraftCard({
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [bookId]);
-  useEffect(() => onDirtyChange?.(dirty || saving || Boolean(deletingId)), [
-    dirty, saving, deletingId, onDirtyChange,
-  ]);
-  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  useDirtyReporter(dirty || saving || Boolean(deletingId), onDirtyChange);
 
   const entries = useMemo(() => library
     ? [...(view === 'character' ? library.characters : library.relationships)]

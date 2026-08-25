@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as api from '../api';
 import { saveChapterPlanWithReconciliation } from '../app-workflows';
 import type { StoryEngine, StoryEngineInput } from '../types';
+import { useDirtyReporter } from '../useDirtyReporter';
 
 const FIELDS: Array<{
   key: keyof StoryEngineInput;
@@ -62,8 +63,7 @@ export function StoryEngineCard({
       ? current : storyEngineInput(engine));
     previousEngine.current = engine;
   }, [engine]);
-  useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
-  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  useDirtyReporter(dirty, onDirtyChange);
 
   const save = async () => {
     if (!dirty || disabled || saving) return;

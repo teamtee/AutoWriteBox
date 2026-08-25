@@ -4,6 +4,7 @@ import type {
   ChapterPlanCarryoverItem, IncomingChapterPlanCarryover,
   ChapterPromiseActionOption, ChapterRhythmIntent,
 } from '../types';
+import { useDirtyReporter } from '../useDirtyReporter';
 
 type ChapterPlanTextField = Exclude<
   keyof ChapterPlanInput,
@@ -358,8 +359,7 @@ export function ChapterPlanCard({
       setError('已保存策划在 AI 生成后发生变化，旧候选已作废；请基于最新版重新生成。');
     }
   }, [candidate, plan]);
-  useEffect(() => onDirtyChange?.(pending), [pending, onDirtyChange]);
-  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  useDirtyReporter(pending, onDirtyChange);
   useEffect(() => () => generationAbort.current?.abort(), []);
 
   const generateDraft = async () => {

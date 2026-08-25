@@ -4,6 +4,7 @@ import type {
   PromiseKind, PromiseLedger, PromiseLedgerEntry, PromiseLedgerEntryInput,
   PromiseProgressEvent, PromiseStatus,
 } from '../types';
+import { useDirtyReporter } from '../useDirtyReporter';
 
 const KIND_LABELS: Record<PromiseKind, string> = {
   main: '主线承诺', character: '人物线', mystery: '谜团/伏笔',
@@ -321,10 +322,7 @@ export function PromiseLedgerCard({
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [bookId]);
-  useEffect(() => onDirtyChange?.(dirty || saving || Boolean(deletingId)), [
-    dirty, saving, deletingId, onDirtyChange,
-  ]);
-  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  useDirtyReporter(dirty || saving || Boolean(deletingId), onDirtyChange);
 
   const visible = useMemo(() => (library?.entries ?? [])
     .filter((entry) => entryMatchesFilter(entry, filter, completedChapterCount))
