@@ -36,6 +36,10 @@ import { CHAPTER_RHYTHM_FINGERPRINT_OPTIONS } from './chapter-review-schema.js';
 import {
   narrativeDesignPlanFields, normalizeNarrativeDesign,
 } from './narrative-design-schema.js';
+import { recordLlmUsage } from './llm-usage.js';
+import {
+  createTextTokenEstimator, estimateChatInputTokens,
+} from './token-estimate.js';
 
 export { MAX_LLM_OUTPUT_CHARS } from './limits.js';
 export { normalizeLlmConfig as validateLlmConfig } from './llm-config.js';
@@ -51,13 +55,12 @@ export function parseSSEChunk(buffer, { secrets = [] } = {}) {
   const errors = [];
   let finished = false;
   let finishReason = null;
+  let usage = null;
   const parts = buffer.split(/\r?\n\r?\n/);
   const rest = parts.pop();  // 最后一段可能不完整，留待下次
   for (const part of parts) {
-    // 第一个终止帧就是此次响应的协议边界。不再解析同一网络块里
-    // 紧随其后的帧，避免 length/content_filter 被后续 stop 覆盖，或把
-    // [DONE] 之后的异常文本拼进最终正文。
-    if (finished) break;
+    // 第一个终止帧就是正文协议边界。其后只允许读取同一网络块中
+    // choices: [] 的 usage 元数据；任何正文、错误或其它帧都忽略。
     const dataLines = part.split(/\r?\n/).filter((l) => l.startsWith('data:'));
     if (!dataLines.length) continue;
     const payload = dataLines.map((line) => line.slice(5).trimStart()).join('\n').trim();
@@ -69,6 +72,25 @@ export function parseSSEChunk(buffer, { secrets = [] } = {}) {
     try {
       const json = JSON.parse(payload);
       if (!isRecord(json)) throw new Error('LLM_SSE_INVALID_EVENT');
+      let hasFrameUsage = false;
+      if (isRecord(json.usage)) {
+        const promptTokens = json.usage.prompt_tokens;
+        const completionTokens = json.usage.completion_tokens;
+        if ((Number.isSafeInteger(promptTokens) && promptTokens >= 0)
+          || (Number.isSafeInteger(completionTokens) && completionTokens >= 0)) {
+          hasFrameUsage = true;
+          usage = {
+            inputTokens: Number.isSafeInteger(promptTokens) && promptTokens >= 0
+              ? promptTokens : null,
+            outputTokens: Number.isSafeInteger(completionTokens) && completionTokens >= 0
+              ? completionTokens : null,
+          };
+        }
+      }
+      if (finished) {
+        if (Array.isArray(json.choices) && json.choices.length === 0 && hasFrameUsage) continue;
+        break;
+      }
       if ('error' in json && json.error !== null && json.error !== undefined) {
         errors.push(cleanLlmError(
           json.error.message || json.error.code || json.error,
@@ -110,7 +132,7 @@ export function parseSSEChunk(buffer, { secrets = [] } = {}) {
       break;
     }
   }
-  return { deltas, errors, finished, finishReason, rest };
+  return { deltas, errors, finished, finishReason, usage, rest };
 }
 
 function cleanLlmError(value, maxLength = 300, secrets = []) {
@@ -190,14 +212,17 @@ function decodeSseBytes(decoder, bytes, options) {
   }
 }
 
-function validateLlmInput(system, messages) {
+function validateLlmInput(system, messages, modelContextChars = MAX_LLM_INPUT_CHARS) {
   if (typeof system !== 'string' || !Array.isArray(messages)) throw new Error('LLM_INPUT_INVALID');
+  const configuredLimit = Number.isSafeInteger(modelContextChars) && modelContextChars > 0
+    ? modelContextChars : MAX_LLM_INPUT_CHARS;
+  const limit = Math.min(configuredLimit, MAX_LLM_INPUT_CHARS);
   let totalChars = system.length;
-  if (totalChars > MAX_LLM_INPUT_CHARS) throw new Error('LLM_INPUT_TOO_LARGE');
+  if (totalChars > limit) throw new Error('LLM_INPUT_TOO_LARGE');
   for (const message of messages) {
     if (!message || typeof message.content !== 'string') throw new Error('LLM_INPUT_INVALID');
     totalChars += message.content.length;
-    if (totalChars > MAX_LLM_INPUT_CHARS) throw new Error('LLM_INPUT_TOO_LARGE');
+    if (totalChars > limit) throw new Error('LLM_INPUT_TOO_LARGE');
   }
 }
 
@@ -316,10 +341,23 @@ export async function discoverLlmModels({ config, signal }) {
   }
 }
 
-export async function* streamChat({ config, system, messages, signal }) {
+export async function* streamChat({ config, system, messages, signal, task = 'unknown' }) {
   const validatedConfig = normalizeLlmConfig(config);
-  validateLlmInput(system, messages);
-  if (activeLlmRequests >= MAX_CONCURRENT_LLM_REQUESTS) throw new Error('LLM_BUSY');
+  validateLlmInput(system, messages, validatedConfig.modelContextChars);
+  const inputChars = messages.reduce(
+    (total, message) => total + message.content.length, system.length,
+  );
+  const estimatedInputTokens = estimateChatInputTokens(system, messages);
+  const usageStartedAt = Date.now();
+  if (activeLlmRequests >= MAX_CONCURRENT_LLM_REQUESTS) {
+    recordLlmUsage({
+      task, provider: validatedConfig.baseUrl, model: validatedConfig.model,
+      status: 'failed', errorCode: 'LLM_BUSY',
+      inputChars, estimatedInputTokens,
+      durationMs: Date.now() - usageStartedAt,
+    });
+    throw new Error('LLM_BUSY');
+  }
   activeLlmRequests += 1;
   const body = {
     model: validatedConfig.model,
@@ -329,6 +367,10 @@ export async function* streamChat({ config, system, messages, signal }) {
   const controller = new AbortController();
   let timedOut = false;
   let protocolComplete = false;
+  let outputChars = 0;
+  const outputTokenEstimator = createTextTokenEstimator();
+  let providerUsage = null;
+  let usageErrorCode = '';
   const forwardAbort = () => controller.abort(signal?.reason);
   if (signal?.aborted) forwardAbort();
   else signal?.addEventListener('abort', forwardAbort, { once: true });
@@ -369,16 +411,17 @@ export async function* streamChat({ config, system, messages, signal }) {
     let buf = '';
     let streamFinished = false;
     let finishReason = null;
-    let outputChars = 0;
     let streamBytes = 0;
     const acceptParsed = (parsed) => {
       if (parsed.errors.length) throw new Error(`LLM_STREAM_ERROR: ${parsed.errors[0]}`);
       if (parsed.finished) streamFinished = true;
       if (parsed.finishReason) finishReason = parsed.finishReason;
+      if (parsed.usage) providerUsage = parsed.usage;
       return parsed.deltas;
     };
     const acceptDelta = (delta) => {
       outputChars += delta.length;
+      outputTokenEstimator.add(delta);
       if (outputChars > MAX_LLM_OUTPUT_CHARS) throw new Error('LLM_RESPONSE_TOO_LARGE');
       return delta;
     };
@@ -425,7 +468,11 @@ export async function* streamChat({ config, system, messages, signal }) {
     if (!streamFinished) throw new Error('LLM_STREAM_INCOMPLETE');
     protocolComplete = true;
   } catch (err) {
-    if (timedOut) throw new Error('LLM_TIMEOUT');
+    usageErrorCode = typeof err?.message === 'string' ? err.message : 'LLM_REQUEST_FAILED';
+    if (timedOut) {
+      usageErrorCode = 'LLM_TIMEOUT';
+      throw new Error('LLM_TIMEOUT');
+    }
     if (signal?.aborted && signal.reason instanceof Error) throw signal.reason;
     if (err?.name === 'TypeError' || err?.name === 'AbortError' || err?.cause) {
       const detail = cleanLlmError(
@@ -442,14 +489,27 @@ export async function* streamChat({ config, system, messages, signal }) {
     if (!protocolComplete && !controller.signal.aborted) {
       controller.abort(new Error('LLM_STREAM_CANCELLED'));
     }
+    const cancelled = !protocolComplete && signal?.aborted && !timedOut;
+    recordLlmUsage({
+      task, provider: validatedConfig.baseUrl, model: validatedConfig.model,
+      status: protocolComplete ? 'success' : cancelled ? 'cancelled' : 'failed',
+      errorCode: protocolComplete ? '' : timedOut ? 'LLM_TIMEOUT'
+        : signal?.reason?.message || usageErrorCode || 'LLM_REQUEST_FAILED',
+      inputChars, outputChars,
+      estimatedInputTokens,
+      estimatedOutputTokens: outputTokenEstimator.estimate(),
+      providerInputTokens: providerUsage?.inputTokens,
+      providerOutputTokens: providerUsage?.outputTokens,
+      durationMs: Date.now() - usageStartedAt,
+    });
     activeLlmRequests -= 1;
   }
 }
 
-export async function nonStreamChat({ config, system, messages, signal }) {
+export async function nonStreamChat({ config, system, messages, signal, task = 'unknown' }) {
   const chunks = [];
   let pending = '';
-  for await (const delta of streamChat({ config, system, messages, signal })) {
+  for await (const delta of streamChat({ config, system, messages, signal, task })) {
     pending += delta;
     if (pending.length >= LLM_OUTPUT_JOIN_CHUNK_CHARS) {
       chunks.push(pending);
@@ -583,7 +643,7 @@ export function sanitizeChapterReview(obj, {
 
 // 模型经常会在 JSON 前后追加说明、示例或 Markdown。相比贪婪正则，逐个扫描
 // 配平的大括号可以避开前后的无效片段，也不会把字符串里的大括号误当成结构。
-function extractFirstJsonObject(text) {
+export function extractFirstJsonObject(text) {
   const source = String(text ?? '');
   const tryParseObject = (candidate) => {
     try {

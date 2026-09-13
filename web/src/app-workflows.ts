@@ -92,6 +92,14 @@ export function verifiedShelfRefresh(
   return books;
 }
 
+export function shouldPreserveChapterEditorDuringReload(
+  selection: Selection, loadedChapter: LoadedChapter | null,
+) {
+  return selection.kind === 'chapter'
+    && loadedChapter?.sectionId === selection.sectionId
+    && loadedChapter.chapter.id === selection.chapterId;
+}
+
 export async function loadBookWorkspace({
   bookId,
   requestedSelection,
@@ -477,6 +485,7 @@ export async function runPersistedCreation<T>({
 export async function saveChapterPlanWithReconciliation<T>({
   save, refresh, isConflict, onConflict, onConflictRefreshFailure,
   onAmbiguous, onAmbiguousRefreshFailure, onSaved, onRefreshFailure, onSuccess,
+  refreshAfterSave = true,
 }: {
   save: () => Promise<T>;
   refresh: () => Promise<void>;
@@ -488,6 +497,7 @@ export async function saveChapterPlanWithReconciliation<T>({
   onSaved: (saved: T) => void;
   onRefreshFailure: (error: unknown) => void;
   onSuccess: () => void;
+  refreshAfterSave?: boolean;
 }): Promise<T> {
   let saved: T;
   try {
@@ -504,6 +514,10 @@ export async function saveChapterPlanWithReconciliation<T>({
     throw error;
   }
   onSaved(saved);
+  if (!refreshAfterSave) {
+    onSuccess();
+    return saved;
+  }
   const refreshError = await refreshPersistedChange(refresh);
   if (refreshError) onRefreshFailure(refreshError);
   else onSuccess();

@@ -43,30 +43,93 @@ export const storyEngineDraftIsDirty = (
   draft: StoryEngineInput, engine: StoryEngine,
 ) => FIELDS.some(({ key }) => draft[key].trim() !== engine[key]);
 
+export function adoptIncomingStoryEngineDraft(
+  current: StoryEngineInput, engine: StoryEngine, incoming: StoryEngineInput,
+) {
+  return storyEngineDraftIsDirty(current, engine)
+    ? { draft: current, applied: false }
+    : { draft: incoming, applied: true };
+}
+
 export function StoryEngineCard({
-  bookId, engine, disabled = false, onRefresh, onDirtyChange,
+  bookId, engine, disabled = false, incomingFill, onRefresh, onSaved, onDirtyChange,
 }: {
   bookId: string;
   engine: StoryEngine;
   disabled?: boolean;
+  incomingFill?: { token: number; storyEngine: StoryEngineInput };
   onRefresh: () => Promise<void>;
+  onSaved?: (saved: StoryEngine) => void;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [draft, setDraft] = useState(() => storyEngineInput(engine));
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
+  const [autoSaveNonce, setAutoSaveNonce] = useState(0);
   const previousEngine = useRef(engine);
+  const lastAutoSaveNonce = useRef(0);
+  const draftRef = useRef(draft);
+  const incomingToken = useRef(incomingFill?.token);
+  const generationAbort = useRef<AbortController | null>(null);
   const dirty = storyEngineDraftIsDirty(draft, engine);
+  draftRef.current = draft;
+  const busy = disabled || saving || generating;
 
   useEffect(() => {
     setDraft((current) => storyEngineDraftIsDirty(current, previousEngine.current)
       ? current : storyEngineInput(engine));
     previousEngine.current = engine;
   }, [engine]);
+  useEffect(() => {
+    if (!incomingFill || incomingToken.current === incomingFill.token) return;
+    incomingToken.current = incomingFill.token;
+    const adopted = adoptIncomingStoryEngineDraft(
+      draftRef.current, engine, incomingFill.storyEngine,
+    );
+    if (!adopted.applied) {
+      setError('AI 核心循环候选已返回，但当前表单已有人工修改；已保留人工草稿，未自动覆盖。');
+      return;
+    }
+    setDraft(adopted.draft);
+    setAutoSaveNonce((value) => value + 1);
+    setError('');
+  }, [engine, incomingFill]);
   useDirtyReporter(dirty, onDirtyChange);
+  useEffect(() => () => generationAbort.current?.abort(), []);
+
+  const generate = async () => {
+    if (busy || !onRefresh) return;
+    const controller = new AbortController();
+    generationAbort.current = controller;
+    setGenerating(true);
+    setError('');
+    try {
+      const result = await api.generateStoryEngineDraft(
+        bookId, engine.revision, controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      if (result.baseRevision !== engine.revision) {
+        setError('核心循环在生成期间已变化，草稿未覆盖；请刷新后重试。');
+        return;
+      }
+      setDraft(result.storyEngine);
+      setAutoSaveNonce((value) => value + 1);
+    } catch (reason) {
+      if (!controller.signal.aborted) {
+        setError(reason instanceof Error ? reason.message : '核心循环生成失败');
+      }
+    } finally {
+      if (generationAbort.current === controller) {
+        generationAbort.current = null;
+        setGenerating(false);
+      }
+    }
+  };
 
   const save = async () => {
-    if (!dirty || disabled || saving) return;
+    if (!dirty || busy) return;
+    lastAutoSaveNonce.current = autoSaveNonce;
     setSaving(true);
     setError('');
     try {
@@ -81,9 +144,13 @@ export function StoryEngineCard({
         onSaved: (saved) => {
           setDraft(storyEngineInput(saved));
           previousEngine.current = saved;
+          onSaved?.(saved);
         },
         onRefreshFailure: () => setError('核心循环已保存，但页面刷新失败；请重新打开本书。'),
         onSuccess: () => setError(''),
+        // 保存接口已经返回完整的新核心循环；正常成功无需再拉取整本工作区。
+        // 大型作品的全量刷新会让按钮长时间停在“保存中”，看起来像卡死。
+        refreshAfterSave: false,
       });
     } catch (saveError) {
       setError((current) => current || (saveError instanceof Error
@@ -93,6 +160,15 @@ export function StoryEngineCard({
     }
   };
 
+  useEffect(() => {
+    if (!dirty || busy || autoSaveNonce <= lastAutoSaveNonce.current) return;
+    const timer = window.setTimeout(() => {
+      lastAutoSaveNonce.current = autoSaveNonce;
+      void save();
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [autoSaveNonce, busy, dirty]);
+
   return (
     <section className="story-engine-card sketch-alt">
       <header>
@@ -100,15 +176,24 @@ export function StoryEngineCard({
           <h3>作品核心循环</h3>
           <p>定义读者为什么愿意连续追读。它约束长期体验，不要求每章机械重复全部步骤。</p>
         </div>
-        <span>{engine.isEmpty && !dirty ? '未定义' : dirty ? '未保存' : '已保存'}</span>
+        <span>{generating ? 'AI 填充中' : engine.isEmpty && !dirty ? '未定义' : dirty ? '未保存' : '已保存'}</span>
       </header>
+      <div className="story-engine-ai">
+        <p>不必先手填五项。AI 或人工修改会在停笔约 1 秒后自动保存；按钮可用于立即保存。</p>
+        {generating
+          ? <button className="hbtn" type="button" onClick={() => generationAbort.current?.abort()}>
+              停止 AI 填充</button>
+          : <button className="hbtn accent" type="button" disabled={busy}
+              onClick={() => void generate()}>✨ AI 一键填充核心循环</button>}
+      </div>
       <div className="story-engine-fields">
         {FIELDS.map((field) => (
           <label key={field.key}>{field.label}
-            <textarea aria-label={field.label} disabled={disabled || saving}
+            <textarea aria-label={field.label} disabled={busy}
               maxLength={500} value={draft[field.key]} placeholder={field.placeholder}
               onChange={(event) => {
                 setDraft((current) => ({ ...current, [field.key]: event.target.value }));
+                setAutoSaveNonce((value) => value + 1);
                 setError('');
               }} />
           </label>
@@ -116,8 +201,8 @@ export function StoryEngineCard({
       </div>
       {error && <p className="story-engine-error" role="alert">{error}</p>}
       <button className="hbtn primary" type="button"
-        disabled={!dirty || disabled || saving} onClick={() => void save()}>
-        {saving ? '保存中…' : '保存核心循环'}
+        disabled={!dirty || busy} onClick={() => void save()}>
+        {saving ? '自动保存中…' : '立即保存'}
       </button>
     </section>
   );

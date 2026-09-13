@@ -224,6 +224,26 @@ export function generatedChapterPlanIsCurrent(
   return result.basePlanRevision === plan.revision;
 }
 
+export function adoptGeneratedChapterPlan(result: ChapterPlanDraftResult): ChapterPlanInput {
+  return {
+    ...result.plan,
+    rhythmIntent: { ...result.plan.rhythmIntent },
+    scenes: result.plan.scenes.map((scene) => ({ ...scene })),
+  };
+}
+
+export function chapterPlanReportsDirty(dirty: boolean, hasCandidate: boolean) {
+  return dirty || hasCandidate;
+}
+
+export function chapterPlanFormNeeded({
+  isEmpty, dirty, hasUndo, hasCandidate,
+}: {
+  isEmpty: boolean; dirty: boolean; hasUndo: boolean; hasCandidate: boolean;
+}) {
+  return !isEmpty || dirty || hasUndo || hasCandidate;
+}
+
 export function chapterPlanWithCarryover(
   draft: ChapterPlanInput, item: ChapterPlanCarryoverItem,
 ): ChapterPlanInput | null {
@@ -322,12 +342,13 @@ export function AiPlanCandidate({ result, replacingDirtyDraft, onAdopt, onDiscar
 
 export function ChapterPlanCard({
   plan, incomingPlanCarryover, promiseActions = [], disabled = false,
-  onSave, onGenerateDraft, onDirtyChange,
+  fillNonce = 0, onSave, onGenerateDraft, onDirtyChange,
 }: {
   plan: ChapterPlan;
   incomingPlanCarryover?: IncomingChapterPlanCarryover | null;
   promiseActions?: ChapterPromiseActionOption[];
   disabled?: boolean;
+  fillNonce?: number;
   onSave: (plan: ChapterPlanInput, expectedRevision: string) => Promise<ChapterPlan>;
   onGenerateDraft?: (
     seedPlan: ChapterPlanInput, expectedPlanRevision: string, signal: AbortSignal,
@@ -338,14 +359,21 @@ export function ChapterPlanCard({
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [candidate, setCandidate] = useState<ChapterPlanDraftResult>();
+  const [undoDraft, setUndoDraft] = useState<ChapterPlanInput>();
   const [error, setError] = useState('');
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const previousPlan = useRef(plan);
   const generationAbort = useRef<AbortController | null>(null);
   const latestPlanRevision = useRef(plan.revision);
+  const lastFillNonce = useRef(fillNonce);
+  const lastAutoSaveSignature = useRef('');
   latestPlanRevision.current = plan.revision;
   const dirty = chapterPlanDraftIsDirty(draft, plan);
-  const pending = dirty || generating || Boolean(candidate);
+  const pending = chapterPlanReportsDirty(dirty, Boolean(candidate));
+  const formNeeded = chapterPlanFormNeeded({
+    isEmpty: plan.isEmpty, dirty, hasUndo: Boolean(undoDraft), hasCandidate: Boolean(candidate),
+  });
+  const [formOpen, setFormOpen] = useState(formNeeded);
 
   useEffect(() => {
     setDraft((current) => chapterPlanDraftIsDirty(current, previousPlan.current)
@@ -360,6 +388,7 @@ export function ChapterPlanCard({
     }
   }, [candidate, plan]);
   useDirtyReporter(pending, onDirtyChange);
+  useEffect(() => { if (formNeeded) setFormOpen(true); }, [formNeeded]);
   useEffect(() => () => generationAbort.current?.abort(), []);
 
   const generateDraft = async () => {
@@ -379,7 +408,9 @@ export function ChapterPlanCard({
         setError('策划卡在 AI 生成期间发生变化，旧候选未采用；请核对最新版后重试。');
         return;
       }
-      setCandidate(result);
+      setUndoDraft(draft);
+      setDraft(adoptGeneratedChapterPlan(result));
+      setCandidate(undefined);
     } catch (reason) {
       if (!controller.signal.aborted) {
         setError(reason instanceof Error ? reason.message : 'AI 策划生成失败');
@@ -391,6 +422,11 @@ export function ChapterPlanCard({
       }
     }
   };
+  useEffect(() => {
+    if (!fillNonce || fillNonce === lastFillNonce.current) return;
+    lastFillNonce.current = fillNonce;
+    void generateDraft();
+  }, [fillNonce]);
 
   const stopGeneration = () => {
     generationAbort.current?.abort();
@@ -413,12 +449,24 @@ export function ChapterPlanCard({
     }
   };
 
+  useEffect(() => {
+    if (!dirty || disabled || saving || generating || candidate) return;
+    const signature = JSON.stringify(draft);
+    if (signature === lastAutoSaveSignature.current) return;
+    const timer = window.setTimeout(() => {
+      lastAutoSaveSignature.current = signature;
+      void save();
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [candidate, dirty, disabled, draft, generating, saving]);
+
   const discard = () => {
     if (!confirmDiscard) {
       setConfirmDiscard(true);
       return;
     }
     setDraft(chapterPlanInput(plan));
+    setUndoDraft(undefined);
     setError('');
     setConfirmDiscard(false);
   };
@@ -479,15 +527,15 @@ export function ChapterPlanCard({
       <header>
         <div>
           <h3>章节策划卡</h3>
-          <p>生成与审稿都会读取已保存的作者意图；AI 候选需先采用、再保存才会生效。</p>
+          <p>生成与审稿读取已保存的作者意图；人工或 AI 填入后，停笔约 1 秒自动保存。</p>
         </div>
-        <span>{generating ? 'AI 策划中' : candidate ? 'AI 候选待确认'
+        <span>{generating ? 'AI 填充中' : undoDraft && dirty ? 'AI 草稿待保存'
           : plan.isEmpty && !dirty ? '未策划' : dirty ? '未保存' : '已保存'}</span>
       </header>
       <div className="chapter-plan-ai-actions">
         <div>
           <strong>先策划，再写正文</strong>
-          <p>AI 会参考全书、本部、前情、核心循环和当前表单，只生成可比较的候选。</p>
+          <p>默认让 AI 填入上方表单，不必先手填模板；填入后会自动保存。</p>
           <p>{draft.qualityProtocolVersion === 3
             ? '质量合同 v3 已启用：伏笔按叙事节拍与认知变化推进，并与人物行动、世界线和正文证据相连。'
             : draft.qualityProtocolVersion === 2
@@ -500,8 +548,14 @@ export function ChapterPlanCard({
             : '旧策划未记录叙事设计合同；升级后会防止反派送证据、万能解法和章尾外挂事故。'}</p>
         </div>
         {generating
-          ? <button className="hbtn" type="button" onClick={stopGeneration}>停止 AI 策划</button>
-          : <><button className="hbtn" type="button"
+          ? <div className="chapter-plan-generating">
+              <p>正在生成策划（两轮模型调用：叙事骨架 → 场景链）。页面可继续停留，不必先填空表。</p>
+              <button className="hbtn" type="button" onClick={stopGeneration}>停止 AI 填充</button>
+            </div>
+          : <><button className="hbtn accent" type="button"
+              disabled={disabled || saving || !onGenerateDraft}
+              onClick={() => void generateDraft()}>✨ AI 一键填充本章策划</button>
+            {formOpen && <><button className="hbtn" type="button"
               disabled={disabled || saving}
               onClick={() => setDraft((current) => chapterPlanQualityTemplate(current))}>
               填入完整写作合同模板
@@ -529,9 +583,7 @@ export function ChapterPlanCard({
                 return next;
               })}>
               本章无认知任务
-            </button><button className="hbtn accent" type="button"
-              disabled={disabled || saving || !onGenerateDraft}
-              onClick={() => void generateDraft()}>✨ AI 生成策划候选</button></>}
+            </button></>}</>}
       </div>
       {plan.readiness && <section className={`chapter-plan-readiness ${plan.readiness.ready ? 'ready' : 'attention'}`}
         aria-label="写前判断状态">
@@ -600,7 +652,10 @@ export function ChapterPlanCard({
           </div>
         </section>
       )}
-      <section className="chapter-rhythm-intent" aria-label="写前节奏意图">
+      <details className="chapter-plan-form" open={formOpen}
+        onToggle={(event) => setFormOpen((event.currentTarget as HTMLDetailsElement).open)}>
+        <summary>编辑策划表单</summary>
+        {formOpen && <><section className="chapter-rhythm-intent" aria-label="写前节奏意图">
         <header><div><h4>写前节奏意图</h4>
           <p>选的是本章准备怎样制造起伏和兑现，不是正文措辞。系统会与最近五章比较，只提示有证据的重复风险。</p>
         </div></header>
@@ -705,13 +760,18 @@ export function ChapterPlanCard({
               </article>
             ))}
           </div>}
-      </section>
+      </section></>}
+      </details>
       {error && <p className="chapter-plan-error" role="alert">{error}</p>}
+      {undoDraft && dirty && <p className="chapter-plan-ai-warning">
+        AI 已填入上方草稿，将在停笔后自动保存，但不会自动生成正文；不采用时请立即撤销。
+      </p>}
       {candidate && <AiPlanCandidate
         result={candidate}
         replacingDirtyDraft={dirty}
         onAdopt={() => {
-          setDraft({ ...candidate.plan, scenes: candidate.plan.scenes.map((scene) => ({ ...scene })) });
+          setUndoDraft(draft);
+          setDraft(adoptGeneratedChapterPlan(candidate));
           setCandidate(undefined);
           setError('');
           setConfirmDiscard(false);
@@ -721,10 +781,15 @@ export function ChapterPlanCard({
           setError('');
         }} />}
       <div className="chapter-plan-actions">
-        <button className="hbtn primary" type="button"
-          disabled={!dirty || disabled || saving || generating} onClick={() => void save()}>
-          {saving ? '保存中…' : '保存策划卡'}
-        </button>
+        <span className="chapter-plan-autosave">{saving ? '自动保存中…'
+          : dirty ? '停笔约 1 秒后自动保存' : '已自动保存'}</span>
+        {undoDraft && dirty && <button className="hbtn" type="button"
+          disabled={disabled || saving || generating}
+          onClick={() => {
+            setDraft(undoDraft);
+            setUndoDraft(undefined);
+            setError('');
+          }}>撤销本次 AI 填充</button>}
         {dirty && <button className="hbtn" type="button"
           disabled={disabled || saving || generating}
           onClick={discard}>{confirmDiscard ? '确认放弃？' : '放弃修改'}</button>}

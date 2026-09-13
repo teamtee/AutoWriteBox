@@ -31,6 +31,7 @@ flowchart LR
 | 路由 | [server/routes/README.md](./server/routes/README.md) | HTTP 合同与取消传播 |
 | 服务端测试 | [server/test/README.md](./server/test/README.md) | 按领域组织的 Node 测试 |
 | 前端 | [web/src/README.md](./web/src/README.md) | React 入口、工作流、API 门面和纯状态工具 |
+| 浏览器 E2E | [tests/e2e/README.md](./tests/e2e/README.md) | 独立临时数据、假模型服务和真实 Chrome 工作流 |
 | 组件 | [web/src/components/README.md](./web/src/components/README.md) | 页面区域与可复用交互组件 |
 | 文档 | [docs/README.md](./docs/README.md) | 产品方向、当前路线图和历史设计记录 |
 
@@ -80,7 +81,7 @@ flowchart LR
 | 新 HTTP 参数、状态码、响应格式 | 对应 `server/routes/*.js`，业务写入仍委托 store 门面 |
 | 新的跨文件存储事务 | 独立 `server/store/*.js` 工厂，由 `store.js` 组装 |
 | 数据规范化或边界 | 对应 `*-schema.js` 或 `limits.js` |
-| 单次调用的分层预算分配与降级标注 | `context-budget.js`；具体窗口函数仍在 `generation-context.js` |
+| 单次调用的分层预算分配、实际装配迭代复核与降级标注 | `context-budget.js`；具体窗口函数仍在 `generation-context.js`，`llm.js` 最终按实际任务模型窗口做硬校验 |
 | 提示词上下文裁剪 | `generation-context.js`；任务指令在 `prompts.js` |
 | 不含原文的章节上下文体检 | `chapter-context-manifest.js`，复用上下文裁剪选择器 |
 | 正文体量、密度的确定性统计与跨章退化趋势 | `chapter-prose-metrics.js`；写前背景仍在 `prompts.js` |

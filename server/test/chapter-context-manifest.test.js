@@ -289,8 +289,11 @@ test('上下文体检把连续节奏同构显示为可解释风险', () => {
 test('上下文体检返回每层需求、实发、保底和全局预算余额', () => {
   const manifest = buildChapterContextManifest(fixture());
   assert.equal(manifest.budget.ceiling, 500_000);
-  assert.ok(manifest.budget.fixedOverheadCharacters > 0);
-  assert.ok(manifest.budget.assignableCharacters < manifest.budget.ceiling);
+  assert.ok(manifest.budget.fixedOverheadCharacters >= 0);
+  assert.equal(
+    manifest.budget.fixedOverheadCharacters + manifest.budget.assignableCharacters,
+    manifest.budget.ceiling,
+  );
   assert.ok(manifest.budget.remainingCharacters >= 0);
   const previous = manifest.budget.layers.find((entry) => entry.id === 'prevEnding');
   assert.ok(previous);
@@ -301,11 +304,36 @@ test('上下文体检返回每层需求、实发、保底和全局预算余额',
 
 test('上下文体检按当前模型登记窗口显示实际预算，而不是固定显示 50 万', () => {
   const input = fixture();
-  input.chapter.body = versioned('当前重写稿'.repeat(10000));
+  input.chapter.body = versioned('当前重写稿'.repeat(500));
   const manifest = buildChapterContextManifest({ ...input, modelContextChars: 32000 });
   assert.equal(manifest.budget.ceiling, 32000);
-  assert.equal(manifest.budget.assignableCharacters, 8000);
-  assert.ok(manifest.budget.layers.some((entry) => entry.truncated));
+  assert.equal(
+    manifest.budget.fixedOverheadCharacters + manifest.budget.assignableCharacters,
+    32000,
+  );
+  assert.ok(manifest.budget.layers.every((entry) => entry.characters <= entry.want));
+});
+
+test('任务固定策划本身放不进模型窗口时体检返回风险而不是让章节读取失败', () => {
+  const input = fixture();
+  const long = (prefix, length) => prefix + '字'.repeat(length - prefix.length);
+  input.chapter.plan = {
+    ...input.chapter.plan,
+    goal: long('本章目标：', 500), obstacle: long('主要阻碍：', 500),
+    choice: long('关键选择：', 500), payoff: long('兑现：', 500),
+    hook: long('章末钩子：', 500), tensionArc: long('压力来源：', 500),
+    foreshadowing: long('无埋点理由：', 500),
+    worldExpansion: long('展开前认知：', 500), notes: '字'.repeat(1000),
+    scenes: Array.from({ length: 12 }, (_, index) => ({
+      title: `场景${index + 1}`, trigger: '字'.repeat(300), desire: '字'.repeat(300),
+      obstacle: '字'.repeat(300), action: '字'.repeat(300),
+      turn: '字'.repeat(300), cost: '字'.repeat(300),
+    })),
+  };
+  const manifest = buildChapterContextManifest({ ...input, modelContextChars: 16_000 });
+  assert.ok(manifest.warnings.some((entry) =>
+    entry.id === 'model-context-too-small' && entry.severity === 'risk'));
+  assert.equal(manifest.budget.ceiling, 16_000);
 });
 
 test('空章尚无正文时只报告跨章趋势，不产生本章配额未达标项', () => {

@@ -162,7 +162,7 @@ export function mountAssetRoutes(app, deps = {}) {
         config,
         system: WRITING_ASSET_ANALYST_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: instruction }],
-        signal: client.signal,
+        signal: client.signal, task: 'writing-asset-extract',
       });
       await client.assertAliveAfterIo();
       const analysis = extractWritingAssetAnalysis(raw);
@@ -226,7 +226,7 @@ export function mountAssetRoutes(app, deps = {}) {
           role: 'user',
           content: buildWritingAssetExtractionInstruction(input),
         }],
-        signal: client.signal,
+        signal: client.signal, task: 'writing-asset-native',
       });
       await client.assertAliveAfterIo();
       const analysis = extractWritingAssetAnalysis(raw);

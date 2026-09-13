@@ -29,6 +29,7 @@ import { styleBibleDiagnostics } from '../style-bible.js';
 import { assertChapterOutputClean } from '../chapter-output-guard.js';
 import { worldProgressRevision } from '../world-progress-schema.js';
 import { buildChapterContextManifest } from '../chapter-context-manifest.js';
+import { fitChapterContextBudget } from '../context-budget.js';
 
 const VERSION_REVISION_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
@@ -76,6 +77,37 @@ function sendRouteError(res, error) {
   if (res.destroyed || res.writableEnded) return;
   if (res.headersSent) res.destroy(error);
   else sendJsonError(res, error);
+}
+
+function fitBookChapterPrompt({
+  snapshot, content, config, systemAppendix = '', buildInstruction,
+}) {
+  return fitChapterContextBudget({
+    book: snapshot.book, section: snapshot.section,
+    prevChapter: snapshot.previousChapter, currentContent: content,
+    writingAssetContext: snapshot.writingAssetContext?.text ?? '',
+  }, {
+    modelContextChars: config.modelContextChars,
+    assemble: (budget) => {
+      const system = buildSystemPrompt(
+        snapshot.book.settings?.core, snapshot.writingAssetContext?.text ?? '',
+        snapshot.book.settings?.storyEngine, budget.allocation,
+      ) + systemAppendix;
+      const context = buildContext({
+        book: snapshot.book, section: snapshot.section,
+        prevChapter: snapshot.previousChapter,
+        bookChapterIndex: snapshot.bookChapterIndex,
+        chapterPlan: snapshot.chapter.plan, currentContent: content,
+        budget: budget.allocation, budgetTrimmed: budget.trimmed,
+      });
+      return {
+        system,
+        messages: [{ role: 'user', content: buildInstruction({
+          context, budget: budget.allocation,
+        }) }],
+      };
+    },
+  });
 }
 
 export function mountBookRoutes(app, deps = {}) {
@@ -403,6 +435,7 @@ export function mountBookRoutes(app, deps = {}) {
           content: buildStageSummaryInstruction({ title: source.title, rows: source.rows }),
         }],
         signal: client.signal,
+        task: 'stage-summary',
       });
       await client.assertAliveAfterIo();
       const summary = typeof raw === 'string' ? raw.trim() : '';
@@ -523,7 +556,7 @@ export function mountBookRoutes(app, deps = {}) {
         config,
         system: '你是长篇小说的连续性编辑。只从给定正文提取摘要、人物状态和可核对事实；不得把推测写成事实。',
         messages: [{ role: 'user', content: `以下是当前已保存正文：\n${content}\n\n${DIGEST_INSTRUCTION}` }],
-        signal: client.signal,
+        signal: client.signal, task: 'memory-recompute',
       });
       await client.assertAliveAfterIo();
       const digest = extractDigest(raw);
@@ -696,23 +729,17 @@ export function mountBookRoutes(app, deps = {}) {
       const config = await store.readConfigForTask('chapter', {
         signal: client.signal, bookId,
       });
-      const system = buildSystemPrompt(
-        snapshot.book.settings?.core, snapshot.writingAssetContext?.text ?? '',
-        snapshot.book.settings?.storyEngine,
-      ) + CHAPTER_REVISION_SYSTEM_APPENDIX;
-      const context = buildContext({
-        book: snapshot.book, section: snapshot.section,
-        prevChapter: snapshot.previousChapter,
-        bookChapterIndex: snapshot.bookChapterIndex,
-        chapterPlan: snapshot.chapter.plan, currentContent: content,
+      const prompt = fitBookChapterPrompt({
+        snapshot, content, config,
+        systemAppendix: CHAPTER_REVISION_SYSTEM_APPENDIX,
+        buildInstruction: ({ context, budget }) => buildChapterRevisionInstruction({
+          stageId: stage.id, chapterIndex: snapshot.chapter.index,
+          bookChapterIndex: snapshot.bookChapterIndex, context, content,
+        }),
       });
       const raw = await nonStreamChat({
-        config, system, messages: [{
-          role: 'user', content: buildChapterRevisionInstruction({
-            stageId: stage.id, chapterIndex: snapshot.chapter.index,
-            bookChapterIndex: snapshot.bookChapterIndex, context, content,
-          }),
-        }], signal: client.signal,
+        config, ...prompt.request, signal: client.signal,
+        task: 'chapter-revision',
       });
       await client.assertAliveAfterIo();
       const candidate = normalizeChapterRevisionCandidate(raw, content);
@@ -775,24 +802,18 @@ export function mountBookRoutes(app, deps = {}) {
       const config = await store.readConfigForTask('chapter', {
         signal: client.signal, bookId,
       });
-      const system = buildSystemPrompt(
-        snapshot.book.settings?.core, snapshot.writingAssetContext?.text ?? '',
-        snapshot.book.settings?.storyEngine,
-      ) + CHAPTER_REVIEW_REVISION_SYSTEM_APPENDIX;
-      const context = buildContext({
-        book: snapshot.book, section: snapshot.section,
-        prevChapter: snapshot.previousChapter,
-        bookChapterIndex: snapshot.bookChapterIndex,
-        chapterPlan: snapshot.chapter.plan, currentContent: content,
+      const prompt = fitBookChapterPrompt({
+        snapshot, content, config,
+        systemAppendix: CHAPTER_REVIEW_REVISION_SYSTEM_APPENDIX,
+        buildInstruction: ({ context, budget }) => buildChapterReviewRevisionInstruction({
+          chapterIndex: snapshot.chapter.index,
+          bookChapterIndex: snapshot.bookChapterIndex,
+          context, content, review, chapterPlan: snapshot.chapter.plan,
+        }),
       });
       const raw = await nonStreamChat({
-        config, system, messages: [{
-          role: 'user', content: buildChapterReviewRevisionInstruction({
-            chapterIndex: snapshot.chapter.index,
-            bookChapterIndex: snapshot.bookChapterIndex,
-            context, content, review, chapterPlan: snapshot.chapter.plan,
-          }),
-        }], signal: client.signal,
+        config, ...prompt.request, signal: client.signal,
+        task: 'chapter-review-revision',
       });
       await client.assertAliveAfterIo();
       const candidate = normalizeChapterRevisionCandidate(raw, content);
@@ -856,25 +877,21 @@ export function mountBookRoutes(app, deps = {}) {
       const config = await store.readConfigForTask('review', {
         signal: client.signal, bookId,
       });
-      const system = buildSystemPrompt(
-        snapshot.book.settings?.core, snapshot.writingAssetContext?.text ?? '',
-        snapshot.book.settings?.storyEngine,
-      );
-      const context = buildContext({
-        book: snapshot.book, section: snapshot.section,
-        prevChapter: snapshot.previousChapter,
-        bookChapterIndex: snapshot.bookChapterIndex,
-        chapterPlan: snapshot.chapter.plan, currentContent: candidate.trim(),
-      });
-      const raw = await nonStreamChat({
-        config, system, messages: [{ role: 'user', content: buildChapterReviewInstruction({
+      const candidateContent = candidate.trim();
+      const prompt = fitBookChapterPrompt({
+        snapshot, content: candidateContent, config,
+        buildInstruction: ({ context, budget }) => buildChapterReviewInstruction({
           chapterIndex: snapshot.chapter.index,
           bookChapterIndex: snapshot.bookChapterIndex,
-          content: candidate.trim(), context,
+          content: candidateContent, context,
           recentReviewSignals: snapshot.recentReviewSignals,
           chapterPlan: snapshot.chapter.plan,
-          sectionOutline: snapshot.section.outline?.content,
-        }) }], signal: client.signal,
+          sectionOutline: snapshot.section.outline?.content, budget,
+        }),
+      });
+      const raw = await nonStreamChat({
+        config, ...prompt.request, signal: client.signal,
+        task: 'chapter-review-verify',
       });
       await client.assertAliveAfterIo();
       const verificationReview = extractChapterReview(raw, {
@@ -937,6 +954,7 @@ export function mountBookRoutes(app, deps = {}) {
           role: 'user', content: buildGoldenThreeReviewInstruction(context.promptContext),
         }],
         signal: client.signal,
+        task: 'golden-three-review',
       });
       await client.assertAliveAfterIo();
       const review = extractGoldenThreeReview(raw, {
@@ -974,7 +992,7 @@ export function mountBookRoutes(app, deps = {}) {
       );
       const {
         book, section, chapter, bookChapterIndex, recentReviewSignals,
-        previousChapter, writingAssetContext, contextRevision,
+        contextRevision,
       } = reviewContext;
       if (chapter.bodyFingerprint !== expectedBodyFingerprint) {
         throw new Error('REVIEW_STALE');
@@ -987,21 +1005,17 @@ export function mountBookRoutes(app, deps = {}) {
       const config = await store.readConfigForTask('review', {
         signal: client.signal, bookId,
       });
-      const system = buildSystemPrompt(
-        book.settings?.core, writingAssetContext?.text ?? '', book.settings?.storyEngine,
-      );
-      const context = buildContext({
-        book, section, prevChapter: previousChapter, bookChapterIndex,
-        chapterPlan: chapter.plan, currentContent: content,
-      });
-      const instruction = buildChapterReviewInstruction({
-        chapterIndex: chapter.index, bookChapterIndex, content, context,
-        recentReviewSignals, chapterPlan: chapter.plan,
-        sectionOutline: section.outline?.content,
+      const prompt = fitBookChapterPrompt({
+        snapshot: reviewContext, content, config,
+        buildInstruction: ({ context, budget }) => buildChapterReviewInstruction({
+          chapterIndex: chapter.index, bookChapterIndex, content, context,
+          recentReviewSignals, chapterPlan: chapter.plan,
+          sectionOutline: section.outline?.content, budget,
+        }),
       });
       const raw = await nonStreamChat({
-        config, system, messages: [{ role: 'user', content: instruction }],
-        signal: client.signal,
+        config, ...prompt.request, signal: client.signal,
+        task: 'chapter-review-manual',
       });
       await client.assertAliveAfterIo();
       const review = extractChapterReview(raw, {

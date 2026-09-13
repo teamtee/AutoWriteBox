@@ -1,9 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import type { PromiseLedgerEntry } from '../types';
+import type { PromiseLedgerDraftResult, PromiseLedgerEntry } from '../types';
 import {
-  emptyPromiseEntryInput, PromiseLedgerList, promiseEntryInput,
-  promiseEntryInputEquals, promiseEntryIsOverdue,
+  emptyPromiseEntryInput, PromiseLedgerAiCandidate, PromiseLedgerList,
+  promiseEntryInput, promiseEntryInputEquals, promiseEntryIsOverdue,
 } from './PromiseLedgerCard';
 
 const ledgerEntry: PromiseLedgerEntry = {
@@ -57,6 +57,22 @@ describe('PromiseLedgerCard helpers and list', () => {
     expect(promiseEntryInputEquals(promiseEntryInput(ledgerEntry), {
       ...promiseEntryInput(ledgerEntry), promise: '另一个承诺',
     })).toBe(false);
+  });
+
+  it('renders AI promises as unsaved candidates instead of reader-known debt', () => {
+    const result: PromiseLedgerDraftResult = {
+      baseRevision: 'R'.repeat(43),
+      entries: [{
+        kind: 'mystery', importance: 4, promise: '查清密信来源',
+        expectedStartChapter: 11, expectedEndChapter: 14, notes: '',
+      }],
+    };
+    const html = renderToStaticMarkup(<PromiseLedgerAiCandidate
+      result={result} existingPromises={[]} disabled={false}
+      onUse={vi.fn()} onDiscard={vi.fn()} />);
+    expect(html).toContain('尚未写盘');
+    expect(html).toContain('不是读者已经看到的债务');
+    expect(html).toContain('载入承诺编辑器');
   });
 
   it('renders API evidence beats as auditable history that cannot be deleted', () => {

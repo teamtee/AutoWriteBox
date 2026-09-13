@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '../api';
+import {
+  characterCraftPairKey, characterGuideDraft, relationshipGuideDraft,
+} from '../ai-fill-apply';
 import type {
-  CharacterCraft, CharacterGuide, CharacterGuideInput, RelationshipGuide,
-  RelationshipGuideInput, RelationshipTemperatureChange,
+  CharacterCraft, CharacterCraftDraftResult, CharacterGuide, CharacterGuideInput,
+  RelationshipGuide, RelationshipGuideInput, RelationshipTemperatureChange,
 } from '../types';
 import { useDirtyReporter } from '../useDirtyReporter';
 
@@ -120,6 +123,47 @@ export function RelationshipList({
         onClick={() => onDelete(entry)}>{deletingId === entry.id ? '删除中…'
           : confirmDeleteId === entry.id ? '确认永久删除？' : '删除'}</button></footer>
   </article>)}</div>;
+}
+
+export function CharacterCraftAiCandidate({
+  result, existingNames, existingPairs, disabled,
+  onUseCharacter, onUseRelationship, onDiscard,
+}: {
+  result: CharacterCraftDraftResult;
+  existingNames: string[];
+  existingPairs: string[];
+  disabled: boolean;
+  onUseCharacter: (entry: CharacterCraftDraftResult['characters'][number]) => void;
+  onUseRelationship: (entry: CharacterCraftDraftResult['relationships'][number]) => void;
+  onDiscard: () => void;
+}) {
+  const names = new Set(existingNames);
+  const pairs = new Set(existingPairs);
+  return <section className="ai-card-candidate" aria-label="AI 人物与关系候选">
+    <header><div><h4>AI 人物与关系候选</h4>
+      <p>候选尚未写盘。每次只载入一项到编辑器，核对并手动保存后才生效。</p>
+    </div><button className="hbtn" type="button" disabled={disabled}
+      onClick={onDiscard}>丢弃全部候选</button></header>
+    <div className="ai-card-candidate-grid">
+      {result.characters.map((entry) => {
+        const exists = names.has(entry.name);
+        return <article key={`character:${entry.name}`}><strong>{entry.name}</strong>
+          <p>{entry.currentDesire || entry.pressureResponse || entry.speechPattern}</p>
+          <button className="hbtn" type="button" disabled={disabled || exists}
+            onClick={() => onUseCharacter(entry)}>{exists ? '已有同名人物' : '载入人物编辑器'}</button>
+        </article>;
+      })}
+      {result.relationships.map((entry) => {
+        const exists = pairs.has(characterCraftPairKey(entry.from, entry.to));
+        return <article key={`relationship:${characterCraftPairKey(entry.from, entry.to)}`}>
+          <strong>{entry.from} ↔ {entry.to}</strong>
+          <p>{entry.surfaceState || entry.privateTension || entry.desiredDirection}</p>
+          <button className="hbtn" type="button" disabled={disabled || exists}
+            onClick={() => onUseRelationship(entry)}>{exists ? '已有这组关系' : '载入关系编辑器'}</button>
+        </article>;
+      })}
+    </div>
+  </section>;
 }
 
 function SharedFields({ value, busy, onChange }: {
@@ -270,8 +314,12 @@ export function CharacterCraftCard({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [candidate, setCandidate] = useState<CharacterCraftDraftResult>();
+  const generationAbort = useRef<AbortController | null>(null);
+  const lastAutoSaveSignature = useRef('');
   const dirty = Boolean(editing && !equal(editing.draft, editing.baseline));
-  const busy = disabled || saving || Boolean(deletingId);
+  const busy = disabled || saving || generating || Boolean(deletingId);
   const reload = async (signal?: AbortSignal) => {
     const next = await api.getCharacterCraft(bookId, signal);
     setLibrary(next);
@@ -279,14 +327,27 @@ export function CharacterCraftCard({
   };
 
   useEffect(() => {
+    generationAbort.current?.abort();
+    generationAbort.current = null;
     const controller = new AbortController();
+    setGenerating(false);
+    setCandidate(undefined);
+    setEditing(undefined);
+    setLibrary(null);
+    setDeletingId(null);
+    setConfirmDeleteId(null);
+    setMessage('');
     setLoading(true);
     reload(controller.signal).then(() => setMessage('')).catch((reason) => {
       if (!controller.signal.aborted) setMessage(reason instanceof Error ? reason.message : String(reason));
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [bookId]);
-  useDirtyReporter(dirty || saving || Boolean(deletingId), onDirtyChange);
+  useDirtyReporter(
+    dirty || generating || Boolean(candidate) || saving || Boolean(deletingId),
+    onDirtyChange,
+  );
+  useEffect(() => () => generationAbort.current?.abort(), []);
 
   const entries = useMemo(() => library
     ? [...(view === 'character' ? library.characters : library.relationships)]
@@ -356,6 +417,17 @@ export function CharacterCraftCard({
     } finally { setSaving(false); }
   };
 
+  useEffect(() => {
+    if (!editing || !dirty || busy || editing.conflicted) return;
+    const signature = JSON.stringify(editing.draft);
+    if (signature === lastAutoSaveSignature.current) return;
+    const timer = window.setTimeout(() => {
+      lastAutoSaveSignature.current = signature;
+      void save();
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [busy, dirty, editing]);
+
   const remove = async (entry: CraftEntry) => {
     if (!library || busy) return;
     if (confirmDeleteId !== entry.id) { setConfirmDeleteId(entry.id); return; }
@@ -383,6 +455,58 @@ export function CharacterCraftCard({
     setView(kind);
     setMessage('');
   };
+  const generate = async () => {
+    if (!library || busy) return;
+    const controller = new AbortController();
+    generationAbort.current = controller;
+    setGenerating(true);
+    setMessage('');
+    try {
+      const result = await api.generateCharacterCraftDraft(
+        bookId, library.revision, controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      if (result.baseRevision !== library.revision) {
+        setMessage('人物导演卡在生成期间已变化，草稿未写入；请刷新后重试。');
+        return;
+      }
+      let next = library;
+      for (const entry of result.characters) {
+        if (next.characters.some((item) => item.name === entry.name)) continue;
+        const saved = await api.saveCharacterGuide(
+          bookId,
+          characterGuideDraft(api.createClientCharacterGuideId(), entry),
+          next.revision,
+        );
+        next = { ...next, revision: saved.revision,
+          characters: [...next.characters, saved.entry as CharacterGuide] };
+      }
+      for (const entry of result.relationships) {
+        const pair = characterCraftPairKey(entry.from, entry.to);
+        if (next.relationships.some((item) => characterCraftPairKey(item.from, item.to) === pair)) continue;
+        const saved = await api.saveRelationshipGuide(
+          bookId,
+          relationshipGuideDraft(api.createClientRelationshipGuideId(), entry),
+          next.revision,
+        );
+        next = { ...next, revision: saved.revision,
+          relationships: [...next.relationships, saved.entry as RelationshipGuide] };
+      }
+      setLibrary(next);
+      setCandidate(undefined);
+      setMessage(`AI 已自动保存 ${result.characters.length} 个人物和 ${result.relationships.length} 组关系；不需要的可直接删除。`);
+    } catch (reason) {
+      if (!controller.signal.aborted) {
+        setMessage(reason instanceof Error ? reason.message : '人物导演卡生成失败');
+      }
+    } finally {
+      if (generationAbort.current === controller) {
+        generationAbort.current = null;
+        setGenerating(false);
+      }
+    }
+  };
+
   const create = (kind: CraftKind) => {
     const chapter = completedChapterCount || 1;
     const draft = kind === 'character'
@@ -410,9 +534,42 @@ export function CharacterCraftCard({
         onClick={() => setView('character')}>人物导演卡</button>
       <button className={`hbtn${view === 'relationship' ? ' active' : ''}`} type="button"
         onClick={() => setView('relationship')}>关系温度</button></div>
-      <button className="hbtn accent" type="button" disabled={busy}
+      {generating
+        ? <button className="hbtn" type="button" onClick={() => generationAbort.current?.abort()}>
+            停止 AI 生成</button>
+        : <button className="hbtn accent" type="button" disabled={busy || Boolean(candidate)}
+            onClick={() => void generate()}>✨ AI 自动生成人物与关系</button>}
+      <button className="hbtn" type="button" disabled={busy}
         onClick={() => create(view)}>＋ 新建{view === 'character' ? '人物' : '关系'}卡</button></div>
-    {message && <p className="character-craft-message" role="alert">{message}</p>}
+    {message && <p className="character-craft-message" role="status">{message}</p>}
+    {candidate && <CharacterCraftAiCandidate
+      result={candidate}
+      existingNames={library.characters.map((entry) => entry.name)}
+      existingPairs={library.relationships.map((entry) =>
+        characterCraftPairKey(entry.from, entry.to))}
+      disabled={busy || Boolean(editing)}
+      onUseCharacter={(entry) => {
+        const draft = characterGuideDraft(api.createClientCharacterGuideId(), entry);
+        const baseline = emptyCharacterGuide(
+          draft.id, draft.asOfChapter ?? (completedChapterCount || 1),
+        );
+        setEditing({ kind: 'character', draft, baseline, conflicted: false });
+        setView('character');
+        setMessage('人物候选已载入编辑器；核对并点击保存后才会写盘。');
+      }}
+      onUseRelationship={(entry) => {
+        const draft = relationshipGuideDraft(api.createClientRelationshipGuideId(), entry);
+        const baseline = emptyRelationshipGuide(
+          draft.id, draft.asOfChapter ?? (completedChapterCount || 1),
+        );
+        setEditing({ kind: 'relationship', draft, baseline, conflicted: false });
+        setView('relationship');
+        setMessage('关系候选已载入编辑器；核对并点击保存后才会写盘。');
+      }}
+      onDiscard={() => {
+        setCandidate(undefined);
+        setMessage('已丢弃 AI 人物与关系候选，未写入任何内容。');
+      }} />}
     {editing && <form className="character-craft-form" onSubmit={(event) => {
       event.preventDefault(); void save();
     }}><header><div><h4>{editing.kind === 'character' ? '编辑人物导演卡' : '编辑关系温度'}</h4>
@@ -441,8 +598,8 @@ export function CharacterCraftCard({
         : <RelationshipForm draft={editing.draft as RelationshipGuideInput} busy={busy}
           completedChapterCount={completedChapterCount}
           onChange={(draft) => setEditing({ ...editing, draft })} />}
-      <footer><button className="hbtn primary" type="submit" disabled={busy || editing.conflicted || !dirty}>
-        {saving ? '保存中…' : '保存导演卡'}</button>
+      <footer><span className="character-craft-autosave">{saving ? '自动保存中…'
+        : dirty ? '停笔约 1 秒后自动保存' : '已自动保存'}</span>
         <span>至少填写一项真正会改变行动、潜台词或关系走向的内容。</span></footer>
     </form>}
     {view === 'character'

@@ -50,13 +50,17 @@ function positiveInteger(value, fallback) {
   return Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
 
+function nonNegativeInteger(value, fallback) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : fallback;
+}
+
 // 两轮分配：先按优先级发放保底额度，再按优先级把剩余额度补到 want。
 // 总额不足以覆盖全部保底时，低优先级层会拿到 0——这仍然是可用降级，
 // 比整次调用抛 LLM_INPUT_TOO_LARGE 让作者白等一次要好。
 export function allocateContextBudget(total, requests = {}, {
   layers = CHAPTER_CONTEXT_LAYERS,
 } = {}) {
-  const budget = positiveInteger(total, MAX_LLM_INPUT_CHARS);
+  const budget = nonNegativeInteger(total, MAX_LLM_INPUT_CHARS);
   const ordered = [...layers].sort((left, right) => right.priority - left.priority
     || left.id.localeCompare(right.id));
   const want = new Map(ordered.map((layer) => {
@@ -116,6 +120,40 @@ function characterScopeLength(characters) {
     : 0;
 }
 
+function boundedStructuredLength(value, cap, depth = 0) {
+  if (cap <= 0 || value === null || value === undefined || depth > 6) return 0;
+  if (typeof value === 'string') return Math.min(cap, value.length);
+  if (typeof value === 'number' || typeof value === 'boolean') return Math.min(cap, 8);
+  if (Array.isArray(value)) {
+    let total = 0;
+    for (const item of value) {
+      total += boundedStructuredLength(item, cap - total, depth + 1) + 1;
+      if (total >= cap) return cap;
+    }
+    return Math.min(total, cap);
+  }
+  if (typeof value === 'object') {
+    let total = 0;
+    for (const [key, item] of Object.entries(value)) {
+      total += Math.min(cap - total, key.length + 2);
+      if (total >= cap) return cap;
+      total += boundedStructuredLength(item, cap - total, depth + 1);
+      if (total >= cap) return cap;
+    }
+    return Math.min(total, cap);
+  }
+  return 0;
+}
+
+function characterCraftLength(craft) {
+  const characters = Array.isArray(craft?.characters) ? craft.characters : [];
+  const relationships = Array.isArray(craft?.relationships) ? craft.relationships : [];
+  if (!characters.length && !relationships.length) return 0;
+  return boundedStructuredLength(
+    { characters, relationships }, MAX_CHARACTER_CRAFT_CONTEXT_CHARS,
+  );
+}
+
 // 只统计"这本书实际有多少内容想进上下文"，不做裁剪。没写世界圣经的作品
 // 不应该占住 2 万字符额度，让真正有内容的层被挤掉。
 export function chapterContextRequests({
@@ -138,13 +176,17 @@ export function chapterContextRequests({
     bookCharacters: characterScopeLength(book.characters),
     sectionCharacters: characterScopeLength(section?.characters),
     prevCharacters: characterScopeLength(prevChapter?.characters),
-    memory: Array.isArray(book?.memory?.facts)
-      ? book.memory.facts.length * 80 : 0,
+    memory: boundedStructuredLength(
+      Array.isArray(book?.memory?.facts) ? book.memory.facts : [],
+      MAX_MEMORY_CONTEXT_CHARS,
+    ),
     prevEnding: chapterContentLength(prevChapter),
-    promiseLedger: Array.isArray(book?.settings?.promiseLedger?.entries)
-      ? book.settings.promiseLedger.entries.length * 200 : 0,
-    characterCraft: Array.isArray(book?.settings?.characterCraft?.characters)
-      ? book.settings.characterCraft.characters.length * 300 : 0,
+    promiseLedger: boundedStructuredLength(
+      Array.isArray(book?.settings?.promiseLedger?.entries)
+        ? book.settings.promiseLedger.entries : [],
+      MAX_PROMISE_LEDGER_CONTEXT_CHARS,
+    ),
+    characterCraft: characterCraftLength(book?.settings?.characterCraft),
     currentContent: textLength(currentContent),
   };
 }
@@ -158,7 +200,7 @@ export function buildChapterContextBudget(input = {}, {
     positiveInteger(modelContextChars, MAX_LLM_INPUT_CHARS), MAX_LLM_INPUT_CHARS,
   );
   const overhead = Math.max(0, fixedOverheadChars);
-  const assignable = Math.max(1, ceiling - overhead);
+  const assignable = Math.max(0, ceiling - overhead);
   return {
     ...allocateContextBudget(assignable, chapterContextRequests(input)),
     ceiling, fixedOverheadChars: overhead,
@@ -166,6 +208,60 @@ export function buildChapterContextBudget(input = {}, {
 }
 
 // 被裁剪的层要在提示词里显式标注，模型才知道"没提到"不等于"不存在"。
+export function fitChapterContextBudget(input = {}, {
+  modelContextChars, assemble,
+} = {}) {
+  if (typeof assemble !== 'function') throw new Error('BAD_CONTEXT_BUDGET_ASSEMBLER');
+  const ceiling = Math.min(
+    positiveInteger(modelContextChars, MAX_LLM_INPUT_CHARS), MAX_LLM_INPUT_CHARS,
+  );
+  let passes = 0;
+  const candidate = (assignableChars) => {
+    const assignable = Math.max(0, Math.min(ceiling, Math.trunc(assignableChars)));
+    const budget = buildChapterContextBudget(input, {
+      modelContextChars: ceiling,
+      fixedOverheadChars: ceiling - assignable,
+    });
+    const request = assemble(budget);
+    passes += 1;
+    if (!request || typeof request.system !== 'string' || !Array.isArray(request.messages)
+      || request.messages.some((message) => !message
+        || typeof message.content !== 'string')) {
+      throw new Error('BAD_CONTEXT_BUDGET_ASSEMBLER');
+    }
+    const totalChars = request.messages.reduce(
+      (total, message) => total + message.content.length, request.system.length,
+    );
+    return { budget, request, totalChars, passes };
+  };
+
+  // 先尝试把整个窗口交给实际有内容的层；若真实组装仍能放下，就不保留
+  // 固定的 24k 空洞。固定指令很大时，再搜索能安全容纳的最大上下文额度。
+  const fullest = candidate(ceiling);
+  if (fullest.totalChars <= ceiling) return fullest;
+  const minimal = candidate(0);
+  if (minimal.totalChars > ceiling) {
+    const error = new Error('LLM_INPUT_TOO_LARGE');
+    error.totalChars = minimal.totalChars;
+    throw error;
+  }
+
+  let best = minimal;
+  let low = 1;
+  let high = ceiling - 1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const current = candidate(middle);
+    if (current.totalChars <= ceiling) {
+      best = current;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return { ...best, passes };
+}
+
 export function budgetTrimNotice(trimmed) {
   if (!Array.isArray(trimmed) || !trimmed.length) return '';
   const rows = trimmed.map(({ label, chars, want }) =>

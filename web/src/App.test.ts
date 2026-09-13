@@ -32,6 +32,7 @@ import {
   verifiedShelfRefresh,
   shouldDisableSidebar,
   shouldDisableVersionedBox,
+  shouldPreserveChapterEditorDuringReload,
   shouldWarnBeforeUnloadForApp,
   shouldShowFirstRun,
   updateDirtyDraftPaths,
@@ -256,6 +257,21 @@ describe('section plan focus restoration', () => {
 });
 
 describe('book workspace loading', () => {
+  it('同章刷新保持正文编辑器挂载，切章刷新仍显示加载态', () => {
+    const chapter = { id: 'c1' } as Chapter;
+    expect(shouldPreserveChapterEditorDuringReload(
+      { kind: 'chapter', sectionId: 's1', chapterId: 'c1' },
+      { sectionId: 's1', chapter },
+    )).toBe(true);
+    expect(shouldPreserveChapterEditorDuringReload(
+      { kind: 'chapter', sectionId: 's1', chapterId: 'c2' },
+      { sectionId: 's1', chapter },
+    )).toBe(false);
+    expect(shouldPreserveChapterEditorDuringReload(
+      { kind: 'outline' }, { sectionId: 's1', chapter },
+    )).toBe(false);
+  });
+
   it('does not let a stale tree response restart loading or request an old chapter', async () => {
     const gate = createLatestRequestGate();
     const token = gate.begin();

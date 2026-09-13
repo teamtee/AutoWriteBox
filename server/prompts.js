@@ -489,6 +489,7 @@ function incomingPlanCarryoverContext(carryover) {
 export function buildChapterInstruction({
   chapterIndex, bookChapterIndex = chapterIndex, wordTarget, mode, whip, currentContent,
   recentReviewSignals = [], chapterPlan, planReadiness, budget = null,
+  requireFullCurrentContent = false,
 }) {
   // 旧配置可能传入低于下限的目标；两处字数必须一致，否则提示词自相矛盾。
   const target = Number.isInteger(wordTarget) && wordTarget > MIN_CHAPTER_BODY_CHARS
@@ -499,10 +500,11 @@ export function buildChapterInstruction({
       ? `用户对当前内容不满，最高优先级要求：『${whip}』。请据此重写第 ${chapterIndex} 章正文，目标体量约 ${target} 字，直接输出正文，不要标题和解说。`
       : `请写第 ${chapterIndex} 章正文，目标体量约 ${target} 字，直接输出正文，不要标题和解说。`;
   // 重写/抽打携带的当前稿也参与分层预算；超预算时保留首尾并显式标记。
-  const currentWindow = budget?.currentContent === 0 ? ''
-    : budget?.currentContent !== undefined
-      ? generationTextWindow(currentContent, budget.currentContent)
-      : currentContent;
+  const currentWindow = requireFullCurrentContent ? currentContent
+    : budget?.currentContent === 0 ? ''
+      : budget?.currentContent !== undefined
+        ? generationTextWindow(currentContent, budget.currentContent)
+        : currentContent;
   const current = currentWindow
     ? boundedJoin(['\n【当前章原文】\n', currentWindow, '\n']) : '';
   const opening = bookChapterIndex <= 3
@@ -545,11 +547,16 @@ function previousPlanContinuityContext(previousPlan, previousChapter) {
 export function buildNarrativeDesignDraftInstruction({
   chapterIndex, bookChapterIndex = chapterIndex, context = '', seedPlan,
   currentContent = '', incomingPlanCarryover, previousPlan, previousChapter,
+  budget = null,
 }) {
   const seed = normalizeChapterPlan(seedPlan);
   const continuityContext = previousPlanContinuityContext(previousPlan, previousChapter);
-  const currentWindow = generationTextWindow(
-    currentContent, MAX_CHAPTER_PLAN_SOURCE_PROMPT_CHARS,
+  const currentContentBudget = budget?.currentContent;
+  const currentWindow = currentContentBudget === 0 ? '' : generationTextWindow(
+    currentContent,
+    currentContentBudget === undefined
+      ? MAX_CHAPTER_PLAN_SOURCE_PROMPT_CHARS
+      : Math.min(MAX_CHAPTER_PLAN_SOURCE_PROMPT_CHARS, currentContentBudget),
   );
   return boundedJoin([
     `先为第 ${chapterIndex} 章制作“叙事骨架”；它是全书第 ${bookChapterIndex} 章。不要写正文，也不要生成完整章节策划。\n`,
@@ -597,12 +604,16 @@ export function buildNarrativeDesignDraftInstruction({
 export function buildChapterPlanDraftInstruction({
   chapterIndex, bookChapterIndex = chapterIndex, context = '', seedPlan,
   currentContent = '', recentReviewSignals = [], incomingPlanCarryover,
-  fixedNarrativeDesign, previousPlan, previousChapter,
+  fixedNarrativeDesign, previousPlan, previousChapter, budget = null,
 }) {
   const seed = normalizeChapterPlan(seedPlan);
   const continuityContext = previousPlanContinuityContext(previousPlan, previousChapter);
-  const currentWindow = generationTextWindow(
-    currentContent, MAX_CHAPTER_PLAN_SOURCE_PROMPT_CHARS,
+  const currentContentBudget = budget?.currentContent;
+  const currentWindow = currentContentBudget === 0 ? '' : generationTextWindow(
+    currentContent,
+    currentContentBudget === undefined
+      ? MAX_CHAPTER_PLAN_SOURCE_PROMPT_CHARS
+      : Math.min(MAX_CHAPTER_PLAN_SOURCE_PROMPT_CHARS, currentContentBudget),
   );
   return boundedJoin([
     `请只为第 ${chapterIndex} 章制作写前策划候选；它是全书第 ${bookChapterIndex} 章。不要写正文，不要声称已经保存。\n`,
@@ -927,8 +938,12 @@ export function buildCoreFieldInstruction(field, book, writingAssetContext = '')
 
 export function buildChapterReviewInstruction({
   chapterIndex, bookChapterIndex = chapterIndex, content, context,
-  recentReviewSignals = [], chapterPlan, sectionOutline,
+  recentReviewSignals = [], chapterPlan, sectionOutline, budget = null,
 }) {
+  const reviewContent = budget?.currentContent === 0 ? ''
+    : budget?.currentContent !== undefined
+      ? generationTextWindow(content, budget.currentContent)
+      : content;
   const reviewableWorldGate = reviewableSectionWorldGate(sectionOutline);
   const hasSectionWorldContract = Boolean(sectionWorldContractPrompt(sectionOutline));
   const worldExpansionReviewChain = chapterPlan?.qualityProtocolVersion >= 2
@@ -956,7 +971,7 @@ export function buildChapterReviewInstruction({
     recentReviewSignalContext(recentReviewSignals),
     chapterPlanContext(chapterPlan),
     '【全书/本部上下文】\n', context, '\n\n',
-    `【第 ${chapterIndex} 章正文】\n`, content, '\n\n',
+    `【第 ${chapterIndex} 章正文】\n`, reviewContent, '\n\n',
     CHAPTER_REVIEW_CRITERIA, '\n',
     '若系统提示词提供了作品核心循环，要检查正文是否正在建立、执行、变奏或升级这套持续体验；不能因为单章处于蓄力或余波阶段机械扣分，但长期脱离核心循环应优先报告。\n',
     '若提供了本章策划卡，必须同时核对正文是否实际完成其目标、阻碍、选择、兑现与钩子；策划卡不是正文证据，未落到场景中的意图应判为风险。\n',

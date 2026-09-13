@@ -1,9 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import type { CharacterGuide, RelationshipGuide } from '../types';
+import type { CharacterCraftDraftResult, CharacterGuide, RelationshipGuide } from '../types';
 import {
-  CharacterList, emptyCharacterGuide, emptyRelationshipGuide,
-  RelationshipList, relationshipTemperatureLabel,
+  CharacterCraftAiCandidate, CharacterList, emptyCharacterGuide,
+  emptyRelationshipGuide, RelationshipList, relationshipTemperatureLabel,
 } from './CharacterCraftCard';
 
 const character: CharacterGuide = {
@@ -42,6 +42,28 @@ describe('CharacterCraftCard lists and helpers', () => {
     expect(html).toContain('轻微靠近');
     expect(html).toContain('私下张力');
     expect(html).toContain('沈砚替沈青挡下追杀');
+  });
+
+  it('renders AI output as a candidate that must be loaded into the editor', () => {
+    const result: CharacterCraftDraftResult = {
+      baseRevision: 'R'.repeat(43),
+      characters: [{
+        name: '沈青', importance: 4, asOfChapter: 8, currentDesire: '问清真相',
+        fear: '被当成累赘', secret: '', pressureResponse: '追问到底',
+        speechPattern: '连珠问句', speechAvoid: '求饶', notes: '',
+      }],
+      relationships: [{
+        from: '沈砚', to: '沈青', importance: 5, asOfChapter: 8, temperature: 1,
+        surfaceState: '互相讥讽', privateTension: '保护被误解',
+        desiredDirection: '第一次坦白', notes: '',
+      }],
+    };
+    const html = renderToStaticMarkup(<CharacterCraftAiCandidate
+      result={result} existingNames={[]} existingPairs={[]} disabled={false}
+      onUseCharacter={vi.fn()} onUseRelationship={vi.fn()} onDiscard={vi.fn()} />);
+    expect(html).toContain('候选尚未写盘');
+    expect(html).toContain('载入人物编辑器');
+    expect(html).toContain('载入关系编辑器');
   });
 
   it('new drafts anchor to the current chapter without inventing character facts', () => {

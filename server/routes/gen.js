@@ -13,9 +13,10 @@ import {
   extractChapterPlanDraft, extractNarrativeDesignDraft,
 } from '../llm.js';
 import {
-  LLM_OUTPUT_JOIN_CHUNK_CHARS, MAX_LLM_OUTPUT_CHARS, MAX_WHIP_CHARS,
+  LLM_OUTPUT_JOIN_CHUNK_CHARS, MAX_LLM_INPUT_CHARS, MAX_LLM_OUTPUT_CHARS,
+  MAX_WHIP_CHARS,
 } from '../limits.js';
-import { buildChapterContextBudget } from '../context-budget.js';
+import { fitChapterContextBudget } from '../context-budget.js';
 import { publicErrorCode, sendJsonError } from '../http-error.js';
 import { createClientAbortTracker } from '../client-abort.js';
 import {
@@ -27,7 +28,9 @@ import {
 import { chapterPlanPromiseAlignment } from '../promise-ledger-schema.js';
 import { assertChapterOutputClean } from '../chapter-output-guard.js';
 import { worldRevealRoute } from '../world-bible.js';
-import { buildBookSummaryFromSectionSummaries } from '../generation-context.js';
+import {
+  buildBookSummaryFromSectionSummaries, generationTextWindow,
+} from '../generation-context.js';
 import { worldProgressPlanningState } from '../world-progress-schema.js';
 
 const VERSION_REVISION_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -35,6 +38,14 @@ const DEFAULT_SSE_HEARTBEAT_MS = 15_000;
 const DEFAULT_SSE_DRAIN_TIMEOUT_MS = 30_000;
 const MAX_SSE_DELTA_BATCH_CHARS = 1_024;
 const MAX_SSE_DELTA_BATCH_DELAY_MS = 50;
+const DIGEST_SYSTEM_PROMPT = '你是长篇小说的连续性编辑。只从给定正文提取摘要、人物状态和可核对事实；不得把推测写成事实。';
+const TITLE_SYSTEM_PROMPT = '你是网文章名编辑。只根据给定摘要和剧情路标拟定简洁、可辨识且不剧透的章名与部名。';
+
+function simpleTaskContentBudget(config, fixedChars) {
+  const configured = Number.isSafeInteger(config?.modelContextChars)
+    ? config.modelContextChars : MAX_LLM_INPUT_CHARS;
+  return Math.max(0, Math.min(configured, MAX_LLM_INPUT_CHARS) - fixedChars - 1_024);
+}
 
 function requireVersionRevision(value, errorCode = 'BAD_VERSION_REVISION') {
   if (typeof value !== 'string' || !VERSION_REVISION_PATTERN.test(value)) {
@@ -186,53 +197,80 @@ export function mountGenRoutes(app, deps = {}) {
       const config = await store.readConfigForTask(
         'chapter', { signal: client.signal, bookId: body.bookId },
       );
-      const system = buildSystemPrompt(
-        snapshot.book.settings.core, snapshot.writingAssetContext?.text ?? '',
-        snapshot.book.settings.storyEngine,
-      );
-      const context = buildContext({
+      const currentContent = store.currentText(snapshot.chapter.body);
+      const budgetInput = {
         book: snapshot.book, section: snapshot.section,
-        prevChapter: snapshot.previousChapter,
-        bookChapterIndex: snapshot.bookChapterIndex,
-        chapterPlan: seedPlan,
-        currentContent: store.currentText(snapshot.chapter.body),
+        prevChapter: snapshot.previousChapter, currentContent,
+        writingAssetContext: snapshot.writingAssetContext?.text ?? '',
+      };
+      const designPrompt = fitChapterContextBudget(budgetInput, {
+        modelContextChars: config.modelContextChars,
+        assemble: (budget) => {
+          const system = buildSystemPrompt(
+            snapshot.book.settings.core, snapshot.writingAssetContext?.text ?? '',
+            snapshot.book.settings.storyEngine, budget.allocation,
+          );
+          const context = buildContext({
+            book: snapshot.book, section: snapshot.section,
+            prevChapter: snapshot.previousChapter,
+            bookChapterIndex: snapshot.bookChapterIndex,
+            chapterPlan: seedPlan, currentContent,
+            budget: budget.allocation, budgetTrimmed: budget.trimmed,
+          });
+          return { system, messages: [{
+            role: 'user',
+            content: buildNarrativeDesignDraftInstruction({
+              chapterIndex: snapshot.chapter.index,
+              bookChapterIndex: snapshot.bookChapterIndex,
+              context, seedPlan, currentContent,
+              incomingPlanCarryover: snapshot.incomingPlanCarryover,
+              previousPlan: snapshot.previousChapter?.plan,
+              previousChapter: snapshot.previousChapter,
+              budget: budget.allocation,
+            }),
+          }] };
+        },
       });
       const designRaw = await nonStreamChat({
-        config, system, signal: client.signal,
-        messages: [{
-          role: 'user',
-          content: buildNarrativeDesignDraftInstruction({
-            chapterIndex: snapshot.chapter.index,
-            bookChapterIndex: snapshot.bookChapterIndex,
-            context,
-            seedPlan,
-            currentContent: store.currentText(snapshot.chapter.body),
-            incomingPlanCarryover: snapshot.incomingPlanCarryover,
-            previousPlan: snapshot.previousChapter?.plan,
-            previousChapter: snapshot.previousChapter,
-          }),
-        }],
+        config, ...designPrompt.request, signal: client.signal,
+        task: 'chapter-plan-design',
       });
       await client.assertAliveAfterIo();
       const narrativeDesign = extractNarrativeDesignDraft(designRaw);
       if (!narrativeDesign) throw new Error('CHAPTER_PLAN_DRAFT_FAILED');
-      const raw = await nonStreamChat({
-        config, system, signal: client.signal,
-        messages: [{
-          role: 'user',
-          content: buildChapterPlanDraftInstruction({
-            chapterIndex: snapshot.chapter.index,
+      const planPrompt = fitChapterContextBudget(budgetInput, {
+        modelContextChars: config.modelContextChars,
+        assemble: (budget) => {
+          const system = buildSystemPrompt(
+            snapshot.book.settings.core, snapshot.writingAssetContext?.text ?? '',
+            snapshot.book.settings.storyEngine, budget.allocation,
+          );
+          const context = buildContext({
+            book: snapshot.book, section: snapshot.section,
+            prevChapter: snapshot.previousChapter,
             bookChapterIndex: snapshot.bookChapterIndex,
-            context,
-            seedPlan,
-            currentContent: store.currentText(snapshot.chapter.body),
-            recentReviewSignals: snapshot.recentReviewSignals,
-            incomingPlanCarryover: snapshot.incomingPlanCarryover,
-            fixedNarrativeDesign: narrativeDesign,
-            previousPlan: snapshot.previousChapter?.plan,
-            previousChapter: snapshot.previousChapter,
-          }),
-        }],
+            chapterPlan: seedPlan, currentContent,
+            budget: budget.allocation, budgetTrimmed: budget.trimmed,
+          });
+          return { system, messages: [{
+            role: 'user',
+            content: buildChapterPlanDraftInstruction({
+              chapterIndex: snapshot.chapter.index,
+              bookChapterIndex: snapshot.bookChapterIndex,
+              context, seedPlan, currentContent,
+              recentReviewSignals: snapshot.recentReviewSignals,
+              incomingPlanCarryover: snapshot.incomingPlanCarryover,
+              fixedNarrativeDesign: narrativeDesign,
+              previousPlan: snapshot.previousChapter?.plan,
+              previousChapter: snapshot.previousChapter,
+              budget: budget.allocation,
+            }),
+          }] };
+        },
+      });
+      const raw = await nonStreamChat({
+        config, ...planPrompt.request, signal: client.signal,
+        task: 'chapter-plan',
       });
       await client.assertAliveAfterIo();
       const plan = extractChapterPlanDraft(raw, { narrativeDesign });
@@ -272,7 +310,9 @@ export function mountGenRoutes(app, deps = {}) {
     }
   });
 
-  async function streamInto(req, res, { config, system, instruction }) {
+  async function streamInto(req, res, {
+    config, system, instruction, task = 'unknown',
+  }) {
     const fullChunks = [];
     let fullPending = '';
     let fullLength = 0;
@@ -287,7 +327,10 @@ export function mountGenRoutes(app, deps = {}) {
       sentFirstDelta = true;
       lastFlushAt = performance.now();
     };
-    for await (const delta of streamChat({ config, system, messages: [{ role: 'user', content: instruction }], signal: res.locals.abortSignal })) {
+    for await (const delta of streamChat({
+      config, system, messages: [{ role: 'user', content: instruction }],
+      signal: res.locals.abortSignal, task,
+    })) {
       assertClientAlive(req, res);
       if (typeof delta !== 'string') {
         throw new Error('LLM_STREAM_ERROR: LLM_SSE_INVALID_EVENT');
@@ -348,7 +391,9 @@ export function mountGenRoutes(app, deps = {}) {
       const instruction = p.type === 'outline'
         ? buildOutlineInstruction(book.premise)
         : buildCoreFieldInstruction(p.field, book, writingAssetContext.text);
-      const full = await streamInto(req, res, { config, system, instruction });
+      const full = await streamInto(req, res, {
+        config, system, instruction, task: 'version-rewrite',
+      });
       await assertClientAliveAfterIo(req, res);
       await store.commitGeneratedBookVersion(req.params.id, path, full, {
         expectedRevision: targetRevision,
@@ -374,6 +419,7 @@ export function mountGenRoutes(app, deps = {}) {
               config: titleConfig,
               system,
               signal: res.locals.abortSignal,
+              task: 'book-title',
               messages: [{
                 role: 'user',
                 content: buildBookTitleInstruction(freshBook.premise, full),
@@ -445,7 +491,7 @@ export function mountGenRoutes(app, deps = {}) {
         store.currentText(book.settings.core.world),
       );
       const full = await streamInto(req, res, {
-        config, system,
+        config, system, task: 'section-plan',
         instruction: buildSectionsInstruction({
           outline: store.currentText(book.outline), worldRoute, occurredSummary,
           startLayer: worldProgress.startLayer,
@@ -569,30 +615,39 @@ export function mountGenRoutes(app, deps = {}) {
       const currentContent = mode === 'whip' || mode === 'rewrite'
         ? savedCurrentContent
         : '';
-      // 各字段上限之和已经越过模型输入硬上限，必须先按优先级分配总额，
-      // 否则满配作品会在装配阶段被硬拒绝。裁剪要显式告知模型。
-      const contextBudget = buildChapterContextBudget({
+      // 先按优先级分配，再用实际组装长度迭代收紧预算；完整策划卡、
+      // 动态指导语和裁剪说明都计入最终模型窗口，不能只依赖固定开销估计。
+      const generationPrompt = fitChapterContextBudget({
         book, section, prevChapter, currentContent,
         writingAssetContext: writingAssetContext?.text ?? '',
-      }, { modelContextChars: config.modelContextChars });
-      const system = buildSystemPrompt(
-        book.settings.core, writingAssetContext?.text ?? '', book.settings.storyEngine,
-        contextBudget.allocation,
-      );
-      const context = buildContext({
-        book, section, prevChapter, bookChapterIndex,
-        chapterPlan: chapter.plan, currentContent: savedCurrentContent,
-        budget: contextBudget.allocation, budgetTrimmed: contextBudget.trimmed,
+      }, {
+        modelContextChars: config.modelContextChars,
+        assemble: (budget) => {
+          const system = buildSystemPrompt(
+            book.settings.core, writingAssetContext?.text ?? '', book.settings.storyEngine,
+            budget.allocation,
+          );
+          const context = buildContext({
+            book, section, prevChapter, bookChapterIndex,
+            chapterPlan: chapter.plan, currentContent: savedCurrentContent,
+            budget: budget.allocation, budgetTrimmed: budget.trimmed,
+          });
+          const instruction = context + '\n\n' + buildChapterInstruction({
+            chapterIndex: chapter.index, bookChapterIndex,
+            wordTarget: config.chapterWordTarget, mode, whip: whip?.trim(), planReadiness,
+            currentContent, recentReviewSignals, chapterPlan: chapter.plan,
+            budget: budget.allocation,
+            requireFullCurrentContent: mode === 'rewrite' || mode === 'whip',
+          });
+          return { system, messages: [{ role: 'user', content: instruction }] };
+        },
       });
-      const instruction = context + '\n\n' +
-        buildChapterInstruction({
-          chapterIndex: chapter.index, bookChapterIndex,
-          wordTarget: config.chapterWordTarget, mode, whip: whip?.trim(), planReadiness,
-          currentContent, recentReviewSignals, chapterPlan: chapter.plan,
-          budget: contextBudget.allocation,
-        });
 
-      full = await streamInto(req, res, { config, system, instruction });
+      full = await streamInto(req, res, {
+        config, system: generationPrompt.request.system,
+        instruction: generationPrompt.request.messages[0].content,
+        task: 'chapter-generate',
+      });
       assertChapterOutputClean(full);
       const generatedFingerprint = store.contentFingerprint(full);
       // 在同一存储锁域内同时复核目标版本和所有提示词上下文，避免长耗时
@@ -619,10 +674,19 @@ export function mountGenRoutes(app, deps = {}) {
           : await store.readConfigForTask(
             'digest', { signal: res.locals.abortSignal, bookId },
           );
+        const digestFixedChars = DIGEST_SYSTEM_PROMPT.length
+          + '以下是正文：\n\n\n'.length + DIGEST_INSTRUCTION.length;
+        const digestSource = generationTextWindow(
+          full, simpleTaskContentBudget(digestConfig, digestFixedChars),
+        );
+        const digestSourceTrimmed = digestSource.length < full.length;
         const digestText = await nonStreamChat({
-          config: digestConfig, system,
+          config: digestConfig, system: DIGEST_SYSTEM_PROMPT,
           signal: res.locals.abortSignal,
-          messages: [{ role: 'user', content: `以下是正文：\n${full}\n\n${DIGEST_INSTRUCTION}` }],
+          messages: [{
+            role: 'user', content: `以下是正文：\n${digestSource}\n\n${DIGEST_INSTRUCTION}`,
+          }],
+          task: 'chapter-digest',
         });
         assertClientAlive(req, res);
         const d = extractDigest(digestText);
@@ -646,8 +710,9 @@ export function mountGenRoutes(app, deps = {}) {
           } else try {
             const titleRaw = await nonStreamChat({
               config: titleSelection.config,
-              system,
+              system: TITLE_SYSTEM_PROMPT,
               signal: res.locals.abortSignal,
+              task: 'chapter-title',
               messages: [{
                 role: 'user',
                 content: buildChapterTitlesInstruction({
@@ -677,7 +742,9 @@ export function mountGenRoutes(app, deps = {}) {
           expectedBodyFingerprint: generatedFingerprint,
           signal: res.locals.abortSignal,
         });
-        if (!digestComplete || !appliedDigest.applied) postprocessWarnings.add('digest');
+        if (!digestComplete || !appliedDigest.applied || digestSourceTrimmed) {
+          postprocessWarnings.add('digest');
+        }
       } catch (error) {
         // 摘要本身失败不影响已保存正文；但客户端已离开时必须终止整条
         // 后处理链，不能继续读盘并发起下一次自动审稿模型请求。
@@ -709,38 +776,42 @@ export function mountGenRoutes(app, deps = {}) {
             : await store.readConfigForTask(
               'review', { signal: res.locals.abortSignal, bookId },
             );
-          // 审稿同时携带完整上下文和完整正文，溢出风险与生成路径相同，
-          // 因此使用同一套分层预算；正文本身占用 currentContent 层。
-          const reviewBudget = buildChapterContextBudget({
+          const reviewPrompt = fitChapterContextBudget({
             book: reviewBook, section: reviewSection,
             prevChapter: reviewPreviousChapter,
             currentContent: reviewContent,
             writingAssetContext: reviewWritingAssetContext?.text ?? '',
-          }, { modelContextChars: reviewConfig.modelContextChars });
-          const reviewSystem = buildSystemPrompt(
-            reviewBook.settings?.core, reviewWritingAssetContext?.text ?? '',
-            reviewBook.settings?.storyEngine, reviewBudget.allocation,
-          );
-          const reviewContext = buildContext({
-            book: reviewBook, section: reviewSection,
-            prevChapter: reviewPreviousChapter,
-            bookChapterIndex: reviewBookChapterIndex,
-            chapterPlan: reviewChapter.plan, currentContent: reviewContent,
-            budget: reviewBudget.allocation, budgetTrimmed: reviewBudget.trimmed,
-          });
-          const reviewInstruction = buildChapterReviewInstruction({
-            chapterIndex: reviewChapter.index,
-            bookChapterIndex: reviewBookChapterIndex,
-            content: reviewContent,
-            context: reviewContext,
-            recentReviewSignals: reviewRecentSignals,
-            chapterPlan: reviewChapter.plan,
-            sectionOutline: reviewSection.outline?.content,
+          }, {
+            modelContextChars: reviewConfig.modelContextChars,
+            assemble: (budget) => {
+              const system = buildSystemPrompt(
+                reviewBook.settings?.core, reviewWritingAssetContext?.text ?? '',
+                reviewBook.settings?.storyEngine, budget.allocation,
+              );
+              const context = buildContext({
+                book: reviewBook, section: reviewSection,
+                prevChapter: reviewPreviousChapter,
+                bookChapterIndex: reviewBookChapterIndex,
+                chapterPlan: reviewChapter.plan, currentContent: reviewContent,
+                budget: budget.allocation, budgetTrimmed: budget.trimmed,
+              });
+              return { system, messages: [{
+                role: 'user',
+                content: buildChapterReviewInstruction({
+                  chapterIndex: reviewChapter.index,
+                  bookChapterIndex: reviewBookChapterIndex,
+                  content: reviewContent, context,
+                  recentReviewSignals: reviewRecentSignals,
+                  chapterPlan: reviewChapter.plan,
+                  sectionOutline: reviewSection.outline?.content,
+                  budget: budget.allocation,
+                }),
+              }] };
+            },
           });
           const reviewRaw = await nonStreamChat({
-            config: reviewConfig, system: reviewSystem,
-            signal: res.locals.abortSignal,
-            messages: [{ role: 'user', content: reviewInstruction }],
+            config: reviewConfig, ...reviewPrompt.request,
+            signal: res.locals.abortSignal, task: 'chapter-review-auto',
           });
           assertClientAlive(req, res);
           const review = extractChapterReview(reviewRaw, {

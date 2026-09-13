@@ -7,6 +7,7 @@ import { createLatestAbortGate, runExclusiveAction } from '../asyncAction';
 import { useToast } from './Toast';
 import { useBeforeUnloadWarning } from './VersionedBox';
 import { ApiProfilePanel } from './ApiProfilePanel';
+import { LlmUsagePanel } from './LlmUsagePanel';
 
 const messageOf = (e: unknown) => e instanceof Error ? e.message : String(e);
 
@@ -252,6 +253,7 @@ export function SettingsPage({ onClose }: { onClose: () => void }) {
           {dirty && <div className="form-hint">请先保存当前 API 设置，再检查连接；检查不会发起正文生成。</div>}
           {discoveryMessage && <div className="form-hint" role="status">{discoveryMessage}</div>}
         </form>
+        <LlmUsagePanel />
       </article>
     </div>
   );

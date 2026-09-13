@@ -5,11 +5,13 @@
 - `app-workflows.ts`：可独立测试的加载、冲突恢复、生成收尾和批量采纳流程。
 - `api.ts`：组件唯一使用的 API 门面。
 - `api-sse.ts` / `api-contract.ts`：底层 SSE 解析和共享错误合同。
-- `promise-ledger-api.ts` / `character-craft-api.ts` / `review-api.ts`：由 API 门面注入传输函数的书级创作领域端点。
+- `promise-ledger-api.ts` / `character-craft-api.ts` / `review-api.ts` / `ai-fill-api.ts`：由 API 门面注入传输函数的书级创作与一键填充端点。
+- `ai-fill-apply.ts`：把人物、关系和计划承诺的 AI 结果转换为未保存编辑草稿；不直接发起持久化写入。
 - `asyncAction.ts`：互斥异步动作和最新请求所有权。
 - `store.ts` / `versioned.ts` / `sections.ts` / `titles.ts`：纯状态与领域工具。
 - `types.ts`：前端数据合同。
 - `theme.ts` / `toast.ts` / `memoryDetails.ts`：展示辅助。
+- `llm-pricing.ts`：浏览器本地按“服务地址 + 模型”保存 USD/CNY 单价、兼容旧模型名价格，并计算会话费用；不写入服务端作品数据。
 - `styles.css`：全局设计样式。
 - [组件索引](./components/README.md)
 

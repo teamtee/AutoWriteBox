@@ -5,6 +5,7 @@ import { lstat } from 'node:fs/promises';
 import { mountConfigRoutes } from './routes/config.js';
 import { mountBookRoutes } from './routes/books.js';
 import { mountGenRoutes } from './routes/gen.js';
+import { mountAiFillRoutes } from './routes/ai-fill.js';
 import { mountAssetRoutes } from './routes/assets.js';
 import {
   cleanupAbandonedTransferDirs, cleanupPreparedBackups, mountStorageRoutes,
@@ -19,6 +20,7 @@ import {
 import { JSON_BODY_LIMIT } from './limits.js';
 import { sendJsonError } from './http-error.js';
 import { openBrowser } from './launcher-preflight.js';
+import { llmUsageSnapshot } from './llm-usage.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 let WEB_DIST = join(__dirname, '..', 'web', 'dist');
@@ -377,10 +379,12 @@ export function createApp({
   app.use('/api', express.json({ limit: JSON_BODY_LIMIT }));
 
   apiRoutes.get('/api/health', (req, res) => res.json({ ok: true }));
+  apiRoutes.get('/api/llm-usage', (req, res) => res.json(llmUsageSnapshot()));
   mountConfigRoutes(apiRoutes, { discoverLlmModels });
   mountStorageRoutes(apiRoutes);
   mountBookRoutes(apiRoutes, { nonStreamChat });
   mountGenRoutes(apiRoutes, { streamChat, nonStreamChat, extractDigest });
+  mountAiFillRoutes(apiRoutes, { nonStreamChat });
   mountAssetRoutes(apiRoutes, { nonStreamChat });
 
   // 同时收敛全局 JSON 与备份上传解析错误，确保 API 不回落为 Express HTML。

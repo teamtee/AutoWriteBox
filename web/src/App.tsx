@@ -19,7 +19,7 @@ import {
   runPersistedCreation,
   refreshStoppedReview, runPersistedReviewRequest, runShelfMutation,
   saveChapterPlanWithReconciliation,
-  shouldDisableSidebar,
+  shouldDisableSidebar, shouldPreserveChapterEditorDuringReload,
   shouldDisableVersionedBox, shouldShowFirstRun, shouldWarnBeforeUnloadForApp,
   updateDirtyDraftPaths, verifiedShelfRefresh,
 } from './app-workflows';
@@ -274,14 +274,20 @@ export default function App() {
   };
   const reload = async (bookId: string, sel?: Selection) => {
     const { token, signal } = chapterLoadGate.begin();
+    const requestedSelection = sel ?? selection;
+    // 同章冲突刷新时保持 VersionedBox 挂载，才能让它把本地草稿与新服务端
+    // 正文合并为显式冲突状态；若先显示 LoadingState，会卸载组件并丢失草稿。
+    const preserveChapterEditor = shouldPreserveChapterEditorDuringReload(
+      requestedSelection, loadedChapter,
+    );
     const snapshot = await loadBookWorkspace({
       bookId,
-      requestedSelection: sel ?? selection,
+      requestedSelection,
       getTree: api.getTree,
       getChapter: api.getChapter,
       signal,
       isCurrent: () => chapterLoadGate.owns(token),
-      setChapterLoading,
+      setChapterLoading: preserveChapterEditor ? undefined : setChapterLoading,
     });
     if (!snapshot) return;
     setTree(snapshot.tree);
@@ -855,7 +861,7 @@ export default function App() {
           review: undefined, reviewContextRevision: undefined } }
         : current),
       onRefreshFailure: () => toast.error('策划卡已保存，但章节上下文刷新失败；请重新打开本章后再生成或审稿'),
-      onSuccess: () => toast.success('✓ 章节策划卡已保存，生成与审稿将使用新意图'),
+      onSuccess: () => toast.success('✓ 章节策划卡已自动保存，生成与审稿将使用新意图'), refreshAfterSave: false,
     });
   };
 
@@ -1362,8 +1368,8 @@ export default function App() {
             streamingText={streamingText} streamingPath={streamingPath}
             onMove={doMove} onRewrite={doRewrite} onClear={doClear} onSave={doSave} onStop={stopGen}
             onDraftDirtyChange={updateDraftDirty}
-            onSaveChapterPlan={doSaveChapterPlan}
-            onRefreshBook={() => reload(bookId, selection)}
+            onSaveChapterPlan={doSaveChapterPlan} onRefreshBook={() => reload(bookId, selection)}
+            onStoryEngineSaved={(saved) => setTree((current) => current && ({ ...current, book: { ...current.book, settings: { ...current.book.settings, storyEngine: saved } } }))}
             reviewing={reviewing} reviewKind={reviewKindRef.current} reviewDisabled={hasAnyLocalDraft || generationBusy || versionMutating || structureMutating || planAdopting || chapterLoading || !activeChapter}
             onReview={doReview} onGoldenThreeReview={doGoldenThreeReview} onStopReview={stopReview} onUseSuggestion={onUseSuggestion}
             publishing={versionMutating && !memoryRecomputing} onPublishChapter={doPublishChapter}

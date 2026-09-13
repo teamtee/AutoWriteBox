@@ -51,6 +51,9 @@ jobs:
       - name: Run frontend tests
         run: npm --prefix web test
 
+      - name: Run browser workflow tests with hosted Chrome
+        run: npm run test:e2e:only
+
       - name: Audit backend production dependencies
         run: npm audit --omit=dev
 

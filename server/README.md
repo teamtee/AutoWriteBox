@@ -7,14 +7,14 @@
 - `index.js`：Express 装配、生命周期和静态资源。
 - `launcher-preflight.js`：依赖、构建产物和运行环境预检。
 - `store.js`：存储公共门面与领域模块组装，不承载新的大块领域实现。
-- `llm.js` / `llm-config.js`：OpenAI 兼容请求和任务模型选择；配置规范化同时携带当前模型的
-  `modelContextChars`，旧配置缺失时回退 500,000。
+- `llm.js` / `llm-config.js`：OpenAI 兼容请求和任务模型选择；配置规范化同时携带当前模型的 `modelContextChars`，旧配置缺失时回退 500,000。
+- `llm-usage.js` / `token-estimate.js`：只记录本次服务进程内的任务名、规范化服务地址、模型、成功/失败/取消、输入输出字符、本地 token 估算、兼容服务主动返回的 usage token 和耗时；保留最近 200 次，不保存提示词、正文、Key。估算 token 与供应商 token 分栏，均不冒充实际费用。
 - `prompts.js` 遵循 context-not-control：只有连续性与知识边界（写错即为错误）以硬约束表述，
   其余关于“怎么写才好看”的内容作为判断依据和原因提供，并显式允许模型按本章需要取舍。
   `CHAPTER_CONTINUITY_CONSTRAINTS` 与 `CHAPTER_CRAFT_CONTEXT` 分别承担这两类。
+- `ai-fill-prompts.js` / `ai-fill-extract.js`：核心循环、人物导演与计划承诺的一键填充指令与解析；结果先回草稿，不直接改作者已保存意图。
 - `prompts.js` / `generation-context.js` / `golden-three-review-prompt.js` / `chapter-revision-prompt.js`：在线任务指令与有界上下文；长期记忆先按当前策划/正文的任务直接命中召回，再按近期上下文、重要度和新近度排序。
-- `context-budget.js`：单次调用的分层预算分配。各字段上限之和已超过模型输入硬上限，
-  因此按 priority 发放保底再补到实际需求；没写的层不占额度，被裁剪的层必须显式标注。
+- `context-budget.js`：单次调用的分层预算分配与实际装配复核。各字段上限之和已超过模型输入硬上限，因此先按 priority 发放保底再补到实际需求，再根据最终 system/messages 字符数搜索可安全容纳的最大上下文额度；没写的层不占额度，被裁剪的层必须显式标注。
   总额取当前任务实际选中模型的登记窗口与本地 500,000 硬上限中的较小值；0 额度严格表示不发送，不能回退字段默认窗口。
   它只计算额度，不拥有具体窗口算法；真正的裁剪仍在 `generation-context.js`。
 - `generation-memory-context.js`：长期记忆事实格式化、任务/近期相关性排序、字符预算选择与诊断计数。

@@ -6,9 +6,12 @@ data/
 !.env.example
 *.novelbox.json
 .DS_Store
+.pi/
 .superpowers/
 .worktrees/
 certs/
 *.tsbuildinfo
+playwright-report/
+test-results/
 web/vite.config.d.ts
 web/vite.config.js

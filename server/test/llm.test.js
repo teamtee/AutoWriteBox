@@ -456,6 +456,27 @@ test('streamChat 在网络请求前拒绝超大上下文', async () => {
   }
 });
 
+test('streamChat 在网络请求前遵守当前模型登记的较小上下文窗口', async () => {
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  try {
+    globalThis.fetch = async () => { calls += 1; return new Response(); };
+    await assert.rejects(async () => {
+      for await (const _ of streamChat({
+        config: {
+          baseUrl: 'https://example.test', model: 'small-context',
+          modelContextChars: 16_000,
+        },
+        system: 'x'.repeat(12_000),
+        messages: [{ role: 'user', content: 'y'.repeat(5_000) }],
+      })) { /* no-op */ }
+    }, /LLM_INPUT_TOO_LARGE/);
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test('streamChat 不把密钥和作品上下文跟随重定向发往其它地址', async () => {
   const realFetch = globalThis.fetch;
   let calls = 0;

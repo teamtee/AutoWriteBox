@@ -93,6 +93,21 @@ describe('chapter plan API', () => {
     expect(events).toEqual(['saved', 'refresh', 'success']);
   });
 
+  it('can skip an unnecessary full workspace refresh after an acknowledged save', async () => {
+    const refresh = vi.fn();
+    const onSuccess = vi.fn();
+    await saveChapterPlanWithReconciliation({
+      save: async () => ({ revision: 'next' }), refresh,
+      isConflict: () => false,
+      onConflict: vi.fn(), onConflictRefreshFailure: vi.fn(),
+      onAmbiguous: vi.fn(), onAmbiguousRefreshFailure: vi.fn(),
+      onSaved: vi.fn(), onRefreshFailure: vi.fn(), onSuccess,
+      refreshAfterSave: false,
+    });
+    expect(refresh).not.toHaveBeenCalled();
+    expect(onSuccess).toHaveBeenCalledOnce();
+  });
+
   it('refreshes a plan conflict, reports it and keeps the rejected error', async () => {
     const conflict = new Error('CHAPTER_PLAN_CONFLICT');
     const onConflict = vi.fn();

@@ -6,7 +6,7 @@ import {
 import {
   CHAPTER_CONTEXT_LAYERS, CHAPTER_PROMPT_FIXED_OVERHEAD_CHARS,
   allocateContextBudget, buildChapterContextBudget, budgetTrimNotice,
-  chapterContextRequests,
+  chapterContextRequests, fitChapterContextBudget,
 } from '../context-budget.js';
 import {
   MAX_BOOK_OUTLINE_PROMPT_CHARS, MAX_BOOK_PROMPT_SUMMARY_CHARS,
@@ -161,6 +161,26 @@ test('内容不足的作品不占用额度，空层的份额让给真正有内�
   assert.equal(allocation.sectionSummary, MAX_SECTION_PROMPT_SUMMARY_CHARS);
 });
 
+test('账本和人物导演需求按实际字段估算并包含关系卡', () => {
+  const requests = chapterContextRequests({
+    book: { settings: {
+      promiseLedger: { entries: [{ promise: big(500), notes: big(1000) }] },
+      characterCraft: {
+        characters: [],
+        relationships: [{
+          from: '甲', to: '乙', surfaceState: big(500), privateTension: big(500),
+          desiredDirection: big(500), notes: big(1000),
+        }],
+      },
+    } },
+  });
+  assert.ok(requests.promiseLedger > 1_000);
+  assert.ok(requests.characterCraft > 2_000);
+  assert.equal(chapterContextRequests({ book: { settings: {
+    promiseLedger: { entries: [] }, characterCraft: { characters: [], relationships: [] },
+  } } }).characterCraft, 0);
+});
+
 test('模型登记的较小上下文窗口会收紧本次预算，较大窗口仍受本地硬上限约束', () => {
   const input = saturatedGenerationInput();
   const small = buildChapterContextBudget(input, { modelContextChars: 32000 });
@@ -180,11 +200,51 @@ test('模型登记的较小上下文窗口会收紧本次预算，较大窗口�
   assert.equal(large.ceiling, MAX_LLM_INPUT_CHARS);
 });
 
+test('零可分配额度不会回退成全局默认预算', () => {
+  const { allocation, total } = allocateContextBudget(0, {});
+  assert.equal(total, 0);
+  assert.ok(Object.values(allocation).every((value) => value === 0));
+});
+
 test('总额不足以覆盖全部保底时按优先级降级，而不是抛错', () => {
   const { allocation } = allocateContextBudget(5_000, {});
   assert.equal(allocation.constraints, 5_000, '最高优先级层先拿满保底');
   assert.equal(allocation.prevEnding, 0);
   assert.equal(allocation.style, 0);
+});
+
+test('实际装配开销高于初始估计时会迭代收紧上下文直到符合模型窗口', () => {
+  const fitted = fitChapterContextBudget({ currentContent: big(50_000) }, {
+    modelContextChars: 32_000,
+    assemble: ({ allocation }) => ({
+      system: big(12_000),
+      messages: [{ role: 'user', content: big(8_000 + allocation.currentContent) }],
+    }),
+  });
+  assert.ok(fitted.passes > 1);
+  assert.ok(fitted.totalChars <= 32_000);
+  assert.ok(fitted.budget.allocation.currentContent <= 12_000);
+});
+
+test('实际固定指令很短时不保留静态 24k 空洞', () => {
+  const fitted = fitChapterContextBudget({ currentContent: big(50_000) }, {
+    modelContextChars: 32_000,
+    assemble: ({ allocation }) => ({
+      system: big(1_000),
+      messages: [{ role: 'user', content: big(allocation.currentContent) }],
+    }),
+  });
+  assert.equal(fitted.budget.allocation.currentContent, 31_000);
+  assert.equal(fitted.totalChars, 32_000);
+});
+
+test('无法容纳任务固定指令时在发起网络请求前明确拒绝', () => {
+  assert.throws(() => fitChapterContextBudget({}, {
+    modelContextChars: 16_000,
+    assemble: () => ({
+      system: big(10_000), messages: [{ role: 'user', content: big(10_000) }],
+    }),
+  }), /LLM_INPUT_TOO_LARGE/);
 });
 
 test('裁剪说明列出被裁层并要求保留未知', () => {

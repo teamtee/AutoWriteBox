@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '../api';
+import { plannedPromiseEntry } from '../ai-fill-apply';
 import type {
-  PromiseKind, PromiseLedger, PromiseLedgerEntry, PromiseLedgerEntryInput,
-  PromiseProgressEvent, PromiseStatus,
+  PromiseKind, PromiseLedger, PromiseLedgerDraftResult, PromiseLedgerEntry,
+  PromiseLedgerEntryInput, PromiseProgressEvent, PromiseStatus,
 } from '../types';
 import { useDirtyReporter } from '../useDirtyReporter';
 
@@ -157,6 +158,36 @@ export function PromiseLedgerList({
   ))}</div>;
 }
 
+export function PromiseLedgerAiCandidate({
+  result, existingPromises, disabled, onUse, onDiscard,
+}: {
+  result: PromiseLedgerDraftResult;
+  existingPromises: string[];
+  disabled: boolean;
+  onUse: (entry: PromiseLedgerDraftResult['entries'][number]) => void;
+  onDiscard: () => void;
+}) {
+  const existing = new Set(existingPromises);
+  return <section className="ai-card-candidate" aria-label="AI 计划承诺候选">
+    <header><div><h4>AI 计划承诺候选</h4>
+      <p>候选尚未写盘。这些只是作者计划，不是读者已经看到的债务；逐项载入编辑器并手动保存后才会生效。</p>
+    </div><button className="hbtn" type="button" disabled={disabled}
+      onClick={onDiscard}>丢弃全部候选</button></header>
+    <div className="ai-card-candidate-grid">
+      {result.entries.map((entry) => {
+        const exists = existing.has(entry.promise);
+        return <article key={`${entry.kind}:${entry.promise}`}>
+          <strong>{KIND_LABELS[entry.kind]} · 重要度 {entry.importance}</strong>
+          <p>{entry.promise}</p>
+          <small>预计第 {entry.expectedStartChapter}–{entry.expectedEndChapter} 章</small>
+          <button className="hbtn" type="button" disabled={disabled || exists}
+            onClick={() => onUse(entry)}>{exists ? '已有相同承诺' : '载入承诺编辑器'}</button>
+        </article>;
+      })}
+    </div>
+  </section>;
+}
+
 function PromiseLedgerForm({
   draft, busy, completedChapterCount, conflicted, serverEntry,
   onChange, onSave, onCancel, onUseServer, onAllowOverwrite, onSaveAsNew,
@@ -272,9 +303,8 @@ function PromiseLedgerForm({
       </div>)}
     </section>
     <div className="promise-ledger-actions">
-      <button className="hbtn primary" type="submit" disabled={busy || conflicted}>
-        {busy ? '保存中…' : '保存承诺'}
-      </button>
+      <span>{busy ? '自动保存中…' : conflicted ? '存在冲突，修改后重试'
+        : '停笔约 1 秒后自动保存'}</span>
       <span>当前已完成 {completedChapterCount} 章；章序均指全书章序。</span>
     </div>
   </form>;
@@ -302,8 +332,12 @@ export function PromiseLedgerCard({
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [candidate, setCandidate] = useState<PromiseLedgerDraftResult>();
+  const generationAbort = useRef<AbortController | null>(null);
+  const lastAutoSaveSignature = useRef('');
   const dirty = Boolean(editing && !promiseEntryInputEquals(editing.draft, editing.baseline));
-  const busy = disabled || saving || Boolean(deletingId);
+  const busy = disabled || saving || generating || Boolean(deletingId);
 
   const reload = async (signal?: AbortSignal) => {
     const next = await api.getPromiseLedger(bookId, signal);
@@ -312,7 +346,16 @@ export function PromiseLedgerCard({
   };
 
   useEffect(() => {
+    generationAbort.current?.abort();
+    generationAbort.current = null;
     const controller = new AbortController();
+    setGenerating(false);
+    setCandidate(undefined);
+    setEditing(undefined);
+    setLibrary(null);
+    setDeletingId(null);
+    setConfirmDeleteId(null);
+    setError('');
     setLoading(true);
     reload(controller.signal)
       .then(() => setError(''))
@@ -322,7 +365,11 @@ export function PromiseLedgerCard({
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [bookId]);
-  useDirtyReporter(dirty || saving || Boolean(deletingId), onDirtyChange);
+  useDirtyReporter(
+    dirty || generating || Boolean(candidate) || saving || Boolean(deletingId),
+    onDirtyChange,
+  );
+  useEffect(() => () => generationAbort.current?.abort(), []);
 
   const visible = useMemo(() => (library?.entries ?? [])
     .filter((entry) => entryMatchesFilter(entry, filter, completedChapterCount))
@@ -386,6 +433,17 @@ export function PromiseLedgerCard({
     }
   };
 
+  useEffect(() => {
+    if (!editing || !dirty || busy || editing.conflicted) return;
+    const signature = JSON.stringify(editing.draft);
+    if (signature === lastAutoSaveSignature.current) return;
+    const timer = window.setTimeout(() => {
+      lastAutoSaveSignature.current = signature;
+      void save();
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [busy, dirty, editing]);
+
   const remove = async (entry: PromiseLedgerEntry) => {
     if (!library || busy) return;
     if (confirmDeleteId !== entry.id) {
@@ -413,6 +471,45 @@ export function PromiseLedgerCard({
     }
   };
 
+  const generate = async () => {
+    if (!library || busy) return;
+    const controller = new AbortController();
+    generationAbort.current = controller;
+    setGenerating(true);
+    setError('');
+    try {
+      const result = await api.generatePromiseLedgerDraft(
+        bookId, library.revision, controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      if (result.baseRevision !== library.revision) {
+        setError('承诺账本在生成期间已变化，计划未写入；请刷新后重试。');
+        return;
+      }
+      let next = library;
+      for (const entry of result.entries) {
+        if (next.entries.some((item) => item.promise === entry.promise)) continue;
+        const saved = await api.savePromiseLedgerEntry(
+          bookId, plannedPromiseEntry(api.createClientPromiseId(), entry), next.revision,
+        );
+        next = { revision: saved.revision, entries: [...next.entries, saved.entry] };
+      }
+      setLibrary(next);
+      setCandidate(undefined);
+      setFilter('planned');
+      setError(`AI 已自动保存 ${result.entries.length} 条计划承诺；不需要的可直接删除。`);
+    } catch (reason) {
+      if (!controller.signal.aborted) {
+        setError(reason instanceof Error ? reason.message : '计划承诺生成失败');
+      }
+    } finally {
+      if (generationAbort.current === controller) {
+        generationAbort.current = null;
+        setGenerating(false);
+      }
+    }
+  };
+
   if (loading) return <section className="promise-ledger-card sketch-alt"><p>正在读取承诺账本…</p></section>;
   if (!library) return <section className="promise-ledger-card sketch-alt">
     <p className="promise-ledger-error" role="alert">{error || '承诺账本读取失败'}</p>
@@ -427,12 +524,17 @@ export function PromiseLedgerCard({
     ? library.entries.find((entry) => entry.id === editing.draft.id) : undefined;
   return <section className="promise-ledger-card sketch-alt">
     <header><div><h3>承诺—推进—兑现账本</h3>
-      <p>只把正文真正建立的期待算作阅读债务；临期和逾期承诺会优先进入生成与审稿。</p></div>
+      <p>已见正文才算阅读债务。AI 只会写入“计划中”条目，不会把模型猜测标成读者已知。</p></div>
       <span>{library.entries.filter((entry) => entry.status === 'open').length} 条待兑现</span></header>
     <div className="promise-ledger-toolbar">
       <div>{FILTERS.map(([value, label]) => <button key={value} className={`hbtn${filter === value ? ' active' : ''}`}
         type="button" onClick={() => setFilter(value)}>{label}</button>)}</div>
-      <button className="hbtn accent" type="button" disabled={busy}
+      {generating
+        ? <button className="hbtn" type="button" onClick={() => generationAbort.current?.abort()}>
+            停止 AI 生成</button>
+        : <button className="hbtn accent" type="button" disabled={busy || Boolean(candidate)}
+            onClick={() => void generate()}>✨ AI 自动生成计划承诺</button>}
+      <button className="hbtn" type="button" disabled={busy}
         onClick={() => {
           const draft = emptyPromiseEntryInput(
             api.createClientPromiseId(), completedChapterCount + 1,
@@ -441,7 +543,23 @@ export function PromiseLedgerCard({
           setError('');
         }}>＋ 新建承诺</button>
     </div>
-    {error && <p className="promise-ledger-error" role="alert">{error}</p>}
+    {error && <p className={error.includes('失败') || error.includes('停止')
+      ? 'promise-ledger-error' : 'promise-ledger-note'}
+      role={error.includes('失败') ? 'alert' : 'status'}>{error}</p>}
+    {candidate && <PromiseLedgerAiCandidate
+      result={candidate}
+      existingPromises={library.entries.map((entry) => entry.promise)}
+      disabled={busy || Boolean(editing)}
+      onUse={(entry) => {
+        const draft = plannedPromiseEntry(api.createClientPromiseId(), entry);
+        const baseline = emptyPromiseEntryInput(draft.id, draft.expectedStartChapter);
+        setEditing({ draft, baseline, conflicted: false });
+        setError('承诺候选已载入编辑器；核对并点击保存后才会写盘。');
+      }}
+      onDiscard={() => {
+        setCandidate(undefined);
+        setError('已丢弃 AI 计划承诺候选，未写入任何内容。');
+      }} />}
     {editing && <PromiseLedgerForm
       draft={editing.draft} busy={busy} completedChapterCount={completedChapterCount}
       conflicted={editing.conflicted} serverEntry={serverEntry}

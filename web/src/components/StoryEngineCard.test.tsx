@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { StoryEngine } from '../types';
 import {
-  StoryEngineCard, storyEngineDraftIsDirty, storyEngineInput,
+  adoptIncomingStoryEngineDraft, StoryEngineCard,
+  storyEngineDraftIsDirty, storyEngineInput,
 } from './StoryEngineCard';
 
 const engine: StoryEngine = {
@@ -28,6 +29,9 @@ describe('StoryEngineCard', () => {
     expect(html).toContain('循环如何持续升级');
     expect(html).toContain('看文明在绝境中进化');
     expect(html).toContain('已保存');
+    expect(html).toContain('AI 一键填充核心循环');
+    expect(html).toContain('停笔约 1 秒后自动保存');
+    expect(html).toContain('立即保存');
   });
 
   it('只把相对服务器循环的实际变化标为草稿', () => {
@@ -40,11 +44,22 @@ describe('StoryEngineCard', () => {
     }, engine)).toBe(false);
   });
 
+  it('AI 返回期间出现人工编辑时保留人工草稿', () => {
+    const current = { ...storyEngineInput(engine), cost: '作者正在修改的代价' };
+    const incoming = { ...storyEngineInput(engine), cost: 'AI 给出的代价' };
+    expect(adoptIncomingStoryEngineDraft(current, engine, incoming)).toEqual({
+      draft: current, applied: false,
+    });
+    expect(adoptIncomingStoryEngineDraft(storyEngineInput(engine), engine, incoming)).toEqual({
+      draft: incoming, applied: true,
+    });
+  });
+
   it('其它创作操作期间禁用全部字段和保存', () => {
     const html = renderToStaticMarkup(
       <StoryEngineCard bookId="book-1" engine={engine} disabled
         onRefresh={async () => {}} />,
     );
-    expect((html.match(/disabled=""/g) || []).length).toBe(6);
+    expect((html.match(/disabled=""/g) || []).length).toBe(7);
   });
 });

@@ -1,10 +1,12 @@
-import type { ApiModelDiscoveryInput, ApiModelDiscoveryResult, ApiProfile, ApiProfileLibrary, ApiProfileSaveInput, ApiTaskRoute, ApiTaskRoutes, Book, BookMemoryLibrary, BookTree, BookSummary, Chapter, ChapterPlan, ChapterPlanDraftResult, ChapterPlanInput, ChapterPublicationPreflight, ChapterPublicationResult, Config, DeletedBook, MemoryDecisionAction, MemoryDecisionResult, MemoryFactMutationResult, PlatformConfirmationInput, Section, SerializationSettings, StageSummaryInput, StageSummaryMutationResult, StorageDiagnostics, StoryEngine, StoryEngineInput, TitleSource, WritingAssetBindingResult, WritingAssetBookBinding, WritingAssetExtractionInput, WritingAssetExtractionResult, WritingAssetLibrary, WritingAssetReferenceInput } from './types';
+import type { ApiModelDiscoveryInput, ApiModelDiscoveryResult, ApiProfile, ApiProfileLibrary, ApiProfileSaveInput, ApiTaskRoute, ApiTaskRoutes, Book, BookMemoryLibrary, BookTree, BookSummary, Chapter, ChapterPlan, ChapterPlanInput, ChapterPublicationPreflight, ChapterPublicationResult, Config, DeletedBook, MemoryDecisionAction, MemoryDecisionResult, MemoryFactMutationResult, PlatformConfirmationInput, Section, SerializationSettings, StageSummaryInput, StageSummaryMutationResult, StorageDiagnostics, StoryEngine, StoryEngineInput, TitleSource, WritingAssetBindingResult, WritingAssetBookBinding, WritingAssetExtractionInput, WritingAssetExtractionResult, WritingAssetLibrary, WritingAssetReferenceInput } from './types';
+import type { LlmUsageSnapshot } from './types';
 import { PUBLIC_ERROR_PAYLOAD } from './api-contract';
 import {
   MAX_SSE_STREAM_BYTES, MAX_STREAM_DELTA_CHARS, parseSSELines,
   SSE_RESPONSE_INVALID_UTF8, SSE_RESPONSE_TOO_LARGE,
 } from './api-sse';
 import type { SSEEvent } from './api-sse';
+import { createAiFillApi } from './ai-fill-api';
 import { createCharacterCraftApi } from './character-craft-api';
 import { createPromiseLedgerApi } from './promise-ledger-api';
 import { createReviewApi } from './review-api';
@@ -17,7 +19,7 @@ const apiErrorMessages: Record<string, string> = {
   LLM_MODEL_INVALID: '模型名不能包含换行或其他控制字符，请重新输入',
   LLM_API_KEY_INVALID: 'API Key 不能包含换行或其他控制字符，请重新输入',
   LLM_CONFIG_TOO_LARGE: '模型配置异常过长，请检查 Base URL、模型名和 API Key',
-  LLM_INPUT_TOO_LARGE: '本次上下文超出模型输入上限，且分层预算未能降级。正常情况下超额材料会被自动裁剪并标注，出现本提示说明装配存在缺陷，请在章节页“API 上下文体检”查看各层实际占用',
+  LLM_INPUT_TOO_LARGE: '本次任务的固定指令、必须完整携带的正文或分层上下文超出当前模型窗口；系统已在发起网络请求前停止。请检查该任务实际选择的模型窗口，改用更大窗口模型，或缩短超长正文后重试',
   LLM_INPUT_INVALID: '当前生成请求结构异常，请刷新页面后重试',
   LLM_BUSY: '当前已有较多生成任务，请等待其中一个完成后再试',
   LLM_EMPTY_BODY: '模型服务返回了空响应，本次内容未保存；请检查接口兼容性后重试',
@@ -68,6 +70,9 @@ const apiErrorMessages: Record<string, string> = {
   CHAPTER_PLAN_CONFLICT: '章节策划卡已被另一页面修改；已拒绝旧页面覆盖，请核对后重试',
   CHAPTER_PLAN_QUALITY_DOWNGRADE: '当前策划已启用新版质量合同，旧页面不能降级覆盖；请刷新后继续编辑', CHAPTER_PLAN_RHYTHM_DOWNGRADE: '当前策划已启用写前节奏意图，旧页面不能降级覆盖；请刷新后继续编辑',
   CHAPTER_PLAN_DRAFT_FAILED: '模型没有返回完整可用的章节与场景策划，本次没有改动当前草稿；请重试或切换模型',
+  STORY_ENGINE_DRAFT_FAILED: '模型没有返回完整的五项核心循环，本次没有改动当前草稿；请重试或切换模型',
+  CHARACTER_CRAFT_DRAFT_FAILED: '模型没有返回可用的人物或关系导演卡，本次没有写入；请重试或切换模型',
+  PROMISE_LEDGER_DRAFT_FAILED: '模型没有返回可用的计划承诺，本次没有写入账本；请重试或切换模型',
   CHAPTER_OUTPUT_LEAKED: '模型把策划、债务编号或审稿字段写进了小说正文，本次结果未保存；请重试或切换模型',
   CHAPTER_PLAN_NOT_READY: '请先完成并保存章节策划的写前质量门槛，再生成正文',
   BAD_STORY_ENGINE: '作品核心循环格式无效，请检查五项内容后重试',
@@ -309,6 +314,9 @@ const jpost = (p: string, b: unknown, signal?: AbortSignal) =>
 const getWithOptionalSignal = (path: string, signal?: AbortSignal) =>
   signal ? fetch(path, { signal }) : fetch(path);
 
+const aiFillApi = createAiFillApi({ jpost });
+export const { generateChapterPlanDraft, generateStoryEngineDraft,
+  generateCharacterCraftDraft, generatePromiseLedgerDraft } = aiFillApi;
 const characterCraftApi = createCharacterCraftApi({ json, jpost, getWithOptionalSignal });
 export const { deleteCharacterCraftEntry, getCharacterCraft,
   saveCharacterGuide, saveRelationshipGuide } = characterCraftApi;
@@ -325,6 +333,8 @@ export const { applyChapterReviewPromiseCandidate, applyChapterReviewWorldGateCa
 
 export const getConfig = (signal?: AbortSignal): Promise<Config> =>
   getWithOptionalSignal('/api/config', signal).then(json);
+export const getLlmUsage = (signal?: AbortSignal): Promise<LlmUsageSnapshot> =>
+  getWithOptionalSignal('/api/llm-usage', signal).then(json);
 export const saveConfig = (config: Config): Promise<Config> => {
   const { revision: expectedRevision, ...patch } = config;
   return jpost('/api/config', { ...patch, expectedRevision });
@@ -457,18 +467,6 @@ export const saveChapterPlan = (
   `/api/books/${encodeURIComponent(bookId)}/sections/${encodeURIComponent(sectionId)}`
     + `/chapters/${encodeURIComponent(chapterId)}/plan`,
   { plan, expectedRevision },
-);
-export const generateChapterPlanDraft = (
-  bookId: string,
-  sectionId: string,
-  chapterId: string,
-  seedPlan: ChapterPlanInput,
-  expectedPlanRevision: string,
-  signal?: AbortSignal,
-): Promise<ChapterPlanDraftResult> => jpost(
-  '/api/gen/chapter-plan-draft',
-  { bookId, sectionId, chapterId, seedPlan, expectedPlanRevision },
-  signal,
 );
 export const saveStoryEngine = (
   bookId: string,

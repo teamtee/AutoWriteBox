@@ -307,6 +307,16 @@ test('buildChapterInstruction 普通重写携带当前章原文', () => {
   assert.match(instruction, /核心情节/);
 });
 
+test('正文重写要求完整原文时不按普通上下文额度裁剪', () => {
+  const source = '开头事实' + '中'.repeat(200) + '结尾事实';
+  const instruction = p.buildChapterInstruction({
+    chapterIndex: 3, wordTarget: 3000, mode: 'rewrite', currentContent: source,
+    budget: { currentContent: 20 }, requireFullCurrentContent: true,
+  });
+  assert.match(instruction, new RegExp(source));
+  assert.doesNotMatch(instruction, /中间内容已省略/);
+});
+
 test('章节生成与审稿都读取作者策划卡，但要求落实为正文而非复述', () => {
   const chapterPlan = {
     goal: '拿到账册', obstacle: '巡逻提前返回', choice: '主角暴露卧底身份',

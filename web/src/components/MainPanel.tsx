@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type {
   BookTree, Chapter, ChapterPlan, ChapterPlanInput, PlatformConfirmationInput,
+  StoryEngine, StoryEngineInput,
 } from '../types';
 import type { Selection } from '../store';
 import { formatIndexedTitle } from '../titles';
@@ -32,6 +33,9 @@ import {
   generateChapterPlanDraft, generateChapterReviewRevisionCandidate,
   generateChapterRevisionCandidate, verifyChapterReviewRevisionCandidate,
 } from '../api';
+import { AiPageFillBar } from './AiPageFillBar';
+import { ChapterContinuityCard } from './ChapterContinuityCard';
+import { CoreAiFillBar } from './CoreAiFillBar';
 
 // core 字段元信息
 const CORE_FIELDS: { field: 'world' | 'style' | 'constraints' | 'pacing'; label: string }[] = [
@@ -40,7 +44,7 @@ const CORE_FIELDS: { field: 'world' | 'style' | 'constraints' | 'pacing'; label:
 ];
 
 // 主区域：三种视图（全书大纲 / 核心设定 / 章节）统一改用 VersionedBox
-export function MainPanel({ tree, selection, chapter, chapterLoading = false, streaming, versionBusy = false, streamingText, streamingPath, onMove, onRewrite, onClear, onSave, onStop, onDraftDirtyChange, onSaveChapterPlan, onRefreshBook, reviewing, reviewKind, reviewDisabled = false, onReview, onGoldenThreeReview, onStopReview, onUseSuggestion, onOpenMemorySource, onSaveDailyWordGoal, onSavePlatformConfirmation, onDeletePlatformConfirmation, publishing = false, onPublishChapter, memoryRecomputing = false, onRecomputeMemory }: {
+export function MainPanel({ tree, selection, chapter, chapterLoading = false, streaming, versionBusy = false, streamingText, streamingPath, onMove, onRewrite, onClear, onSave, onStop, onDraftDirtyChange, onSaveChapterPlan, onRefreshBook, onStoryEngineSaved, reviewing, reviewKind, reviewDisabled = false, onReview, onGoldenThreeReview, onStopReview, onUseSuggestion, onOpenMemorySource, onSaveDailyWordGoal, onSavePlatformConfirmation, onDeletePlatformConfirmation, publishing = false, onPublishChapter, memoryRecomputing = false, onRecomputeMemory }: {
   tree: BookTree; selection: Selection; chapter?: Chapter | null; chapterLoading?: boolean;
   streaming: boolean; versionBusy?: boolean; streamingText: string; streamingPath: string | null;
   onMove: (path: string, delta: number) => void;
@@ -53,6 +57,7 @@ export function MainPanel({ tree, selection, chapter, chapterLoading = false, st
     plan: ChapterPlanInput, expectedRevision: string,
   ) => Promise<ChapterPlan>;
   onRefreshBook?: () => Promise<void>;
+  onStoryEngineSaved?: (saved: StoryEngine) => void;
   reviewing?: boolean;
   reviewKind?: 'chapter' | 'golden-three' | null;
   reviewDisabled?: boolean;
@@ -71,6 +76,7 @@ export function MainPanel({ tree, selection, chapter, chapterLoading = false, st
 }) {
   const [styleDirty, setStyleDirty] = useState(false);
   const [styleDraftRequest, setStyleDraftRequest] = useState<{ token: number; text: string }>();
+  const [engineFill, setEngineFill] = useState<{ token: number; storyEngine: StoryEngineInput }>();
   const [revisionDraftRequest, setRevisionDraftRequest] = useState<{
     token: number; path: string; text: string;
   }>();
@@ -96,27 +102,58 @@ export function MainPanel({ tree, selection, chapter, chapterLoading = false, st
   });
 
   if (selection.kind === 'outline') {
-    return <main className="main"><VersionedBox title="全书大纲" versioned={tree.book.outline} size="lg" {...boxProps('outline')} /></main>;
+    const outlineEmpty = !currentText(tree.book.outline).trim();
+    return <main className="main">
+      <AiPageFillBar
+        title="全书大纲"
+        description="不必先手写总纲。AI 会根据开篇设想生成可执行大纲并写入版本，你再改。"
+        actionLabel={outlineEmpty ? '✨ AI 一键填充全书大纲' : '✨ AI 重写全书大纲'}
+        disabled={streaming || versionBusy || !!reviewing}
+        onFill={() => onRewrite('outline')} />
+      <VersionedBox title="全书大纲" versioned={tree.book.outline} size="lg"
+        rewriteLabel={outlineEmpty ? '✨ AI 一键填充' : '🔄 重写'}
+        {...boxProps('outline')} />
+    </main>;
   }
 
   if (selection.kind === 'core') {
     return (
-      <main className="main">
-        <BookModelBindingPanel
-          bookId={tree.book.id}
-          disabled={streaming || versionBusy || !!reviewing} />
-        <StoryEngineCard
+      <main className="main core-settings-main">
+        <section className="core-setup-guide sketch" aria-label="核心设定推荐顺序">
+          <h2>先做三件事，就可以开始写</h2>
+          <ol><li><strong>核心循环</strong>：先点 AI 填充，停笔约 1 秒后自动保存。</li>
+            <li><strong>世界与文风</strong>：补下面四个基础框；不确定的可以先让 AI 生成。</li>
+            <li><strong>人物、承诺和资料库</strong>：属于进阶内容，第一章写起来后再补也可以。</li></ol>
+        </section>
+        <CoreAiFillBar key={`core-ai-fill:${tree.book.id}`}
           bookId={tree.book.id}
           engine={tree.book.settings.storyEngine}
           disabled={streaming || versionBusy || !!reviewing}
+          emptyFields={CORE_FIELDS.filter(({ field }) => !currentText(tree.book.settings.core[field]).trim())
+            .map(({ field, label }) => ({ path: `core:${field}`, label }))}
+          onEngineDraft={(storyEngine) => setEngineFill((current) => ({
+            token: (current?.token ?? 0) + 1, storyEngine,
+          }))}
+          onRewrite={onRewrite} />
+        <StoryEngineCard key={`story-engine:${tree.book.id}`}
+          bookId={tree.book.id}
+          engine={tree.book.settings.storyEngine}
+          incomingFill={engineFill}
+          disabled={streaming || versionBusy || !!reviewing}
           onRefresh={onRefreshBook ?? (async () => {})}
+          onSaved={onStoryEngineSaved}
           onDirtyChange={(dirty) => onDraftDirtyChange?.('story-engine', dirty)} />
-        <PromiseLedgerCard
+        <details className="core-advanced sketch">
+          <summary>进阶资料：人物、承诺、创作资产与长期记忆（可稍后）</summary>
+          <BookModelBindingPanel
+            bookId={tree.book.id}
+            disabled={streaming || versionBusy || !!reviewing} />
+        <PromiseLedgerCard key={`promise-ledger:${tree.book.id}`}
           bookId={tree.book.id}
           completedChapterCount={completedChapterCount}
           disabled={streaming || versionBusy || !!reviewing}
           onDirtyChange={(dirty) => onDraftDirtyChange?.('promise-ledger', dirty)} />
-        <CharacterCraftCard
+        <CharacterCraftCard key={`character-craft:${tree.book.id}`}
           bookId={tree.book.id}
           completedChapterCount={completedChapterCount}
           disabled={streaming || versionBusy || !!reviewing}
@@ -153,14 +190,20 @@ export function MainPanel({ tree, selection, chapter, chapterLoading = false, st
           diagnostics={tree.book.settings.worldBibleDiagnostics} />}
         {tree.book.settings.styleBibleDiagnostics && <StyleBibleDiagnosticsCard
           diagnostics={tree.book.settings.styleBibleDiagnostics} />}
-        {CORE_FIELDS.map(({ field, label }) => (
-          <VersionedBox key={field} title={label} versioned={tree.book.settings.core[field]}
+        </details>
+        {CORE_FIELDS.map(({ field, label }) => {
+          const empty = !currentText(tree.book.settings.core[field]).trim();
+          const rewriteLabel = field === 'world'
+            ? (empty ? '✨ AI 一键填充世界圣经' : '🌍 API 重构世界圣经')
+            : field === 'style'
+              ? (empty ? '✨ AI 一键填充文风圣经' : '🖋 API 重构文风圣经')
+              : (empty ? '✨ AI 一键填充' : '🔄 重写');
+          return <VersionedBox key={field} title={label} versioned={tree.book.settings.core[field]}
             size={field === 'world' || field === 'style' ? 'lg' : 'sm'}
-            rewriteLabel={field === 'world' ? '🌍 API 重构世界圣经'
-              : field === 'style' ? '🖋 API 重构文风圣经' : '🔄 重写'}
+            rewriteLabel={rewriteLabel}
             incomingDraft={field === 'style' ? styleDraftRequest : undefined}
-            {...boxProps(`core:${field}`)} />
-        ))}
+            {...boxProps(`core:${field}`)} />;
+        })}
       </main>
     );
   }
@@ -235,6 +278,7 @@ export function MainPanel({ tree, selection, chapter, chapterLoading = false, st
         onClear={() => onClear(path)} onSave={(t) => onSave(path, t)} onStop={onStop}
         incomingDraft={revisionDraftRequest?.path === path ? revisionDraftRequest : undefined}
         onDirtyChange={(dirty) => onDraftDirtyChange?.(path, dirty)} />
+      <ChapterContinuityCard chapter={chapter} />
       {onPublishChapter && <ChapterPublicationCard
         key={`publication:${path}:${chapter.bodyFingerprint}`}
         bookId={tree.book.id}

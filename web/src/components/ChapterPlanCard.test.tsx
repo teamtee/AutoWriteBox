@@ -2,7 +2,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { ChapterPlan, IncomingChapterPlanCarryover } from '../types';
 import {
-  AiPlanCandidate, ChapterPlanCard, chapterPlanDraftIsDirty, chapterPlanInput,
+  adoptGeneratedChapterPlan, AiPlanCandidate, ChapterPlanCard,
+  chapterPlanDraftIsDirty, chapterPlanFormNeeded, chapterPlanInput,
+  chapterPlanReportsDirty,
   activateChapterPlanDesignProtocol, activateChapterPlanQualityProtocol,
   chapterPlanQualityTemplate, chapterPlanWithCarryover,
   chapterPlanWithPromiseAction, chapterPlanWithoutForeshadowingTask,
@@ -75,13 +77,13 @@ describe('ChapterPlanCard', () => {
     expect(html).toContain('过桥受阻');
     expect(html).toContain('撕页纤维');
     expect(html).toContain('城外徽记');
-    expect(html).toContain('AI 生成策划候选');
+    expect(html).toContain('AI 一键填充本章策划');
     expect(html).toContain('填入完整写作合同模板');
     expect(html).toContain('决策因果链');
     expect(html).toContain('认知与证据边界');
     expect(html).toContain('本章无认知任务');
-    expect(html).toContain('只生成可比较的候选');
-    expect(html).toContain('AI 候选需先采用、再保存才会生效');
+    expect(html).toContain('默认让 AI 填入上方表单');
+    expect(html).toContain('停笔约 1 秒自动保存');
     expect(html).toContain('写前判断已齐备');
     expect(html).toContain('这些意图会作为明确要求发送');
   });
@@ -224,14 +226,14 @@ describe('ChapterPlanCard', () => {
     expect(html).toContain('正文 API 不得把 ID 写进小说');
   });
 
-  it('其它章节操作期间禁用全部输入与保存', () => {
+  it('其它章节操作期间禁用全部输入与 AI 填充', () => {
     const html = renderToStaticMarkup(
       <ChapterPlanCard plan={plan} disabled onSave={vi.fn()} onGenerateDraft={vi.fn()} />,
     );
     expect(html).toMatch(/aria-label="场景 1 人物欲望" disabled=""/);
     expect(html).toMatch(/aria-label="删除场景 1" disabled=""/);
-    expect(html).toMatch(/>保存策划卡<\/button>/);
-    expect(html).toMatch(/disabled=""[^>]*>✨ AI 生成策划候选<\/button>/);
+    expect(html).toContain('已自动保存');
+    expect(html).toMatch(/disabled=""[^>]*>✨ AI 一键填充本章策划<\/button>/);
   });
 
   it('只允许采用基于当前已保存策划修订生成的候选', () => {
@@ -254,5 +256,38 @@ describe('ChapterPlanCard', () => {
     expect(html).toContain('替换当前未保存表单');
     expect(html).toContain('桥上对峙');
     expect(html).not.toContain('已生成正文');
+  });
+
+  it('AI 结果直接进入编辑草稿，生成中不把页面标成未保存草稿',
+    () => {
+      const result = { plan: chapterPlanInput(plan), basePlanRevision: plan.revision };
+      const adopted = adoptGeneratedChapterPlan(result);
+      expect(adopted.goal).toBe(plan.goal);
+      expect(adopted.scenes[0].title).toBe(plan.scenes[0].title);
+      expect(adopted.scenes[0]).not.toBe(result.plan.scenes[0]);
+      expect(chapterPlanReportsDirty(false, false)).toBe(false);
+      expect(chapterPlanReportsDirty(true, false)).toBe(true);
+      expect(chapterPlanReportsDirty(false, true)).toBe(true);
+      expect(chapterPlanFormNeeded({
+        isEmpty: true, dirty: false, hasUndo: false, hasCandidate: false,
+      })).toBe(false);
+      expect(chapterPlanFormNeeded({
+        isEmpty: true, dirty: true, hasUndo: true, hasCandidate: false,
+      })).toBe(true);
+    });
+
+  it('空策划默认不展开巨大表单，只保留 AI 填充入口', () => {
+    const empty = {
+      ...plan, isEmpty: true, goal: '', obstacle: '', choice: '', payoff: '', hook: '',
+      tensionArc: '', foreshadowing: '', worldExpansion: '', decisionChain: '',
+      knowledgeDesign: '', notes: '', scenes: [],
+    };
+    const html = renderToStaticMarkup(
+      <ChapterPlanCard plan={empty} onSave={vi.fn()} onGenerateDraft={vi.fn()} />,
+    );
+    expect(html).toContain('✨ AI 一键填充本章策划');
+    expect(html).toContain('编辑策划表单');
+    expect(html).not.toContain('aria-label="本章目标"');
+    expect(html).not.toContain('填入完整写作合同模板');
   });
 });

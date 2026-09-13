@@ -1348,7 +1348,8 @@ describe('readableApiError', () => {
     expect(readableApiError('PREMISE_TOO_LARGE')).toContain('2 万');
     expect(readableApiError('TEXT_TOO_LARGE')).toContain('20 万');
     expect(readableApiError('BAD_CHAPTER_WORD_TARGET')).toContain('50000');
-    expect(readableApiError('LLM_INPUT_TOO_LARGE')).toContain('分层预算');
+    expect(readableApiError('LLM_INPUT_TOO_LARGE')).toContain('当前模型窗口');
+    expect(readableApiError('LLM_INPUT_TOO_LARGE')).toContain('发起网络请求前停止');
     expect(readableApiError('LLM_BUSY')).toContain('等待');
     expect(readableApiError('STORAGE_FULL')).toContain('磁盘空间');
     expect(readableApiError('STORAGE_PERMISSION_DENIED')).toContain('目录不可写');

@@ -48,6 +48,50 @@ export interface StoryEngine extends StoryEngineInput {
 export type PromiseKind = 'main' | 'character' | 'mystery' | 'relationship'
   | 'growth' | 'world' | 'other';
 export type PromiseStatus = 'planned' | 'open' | 'paid' | 'abandoned';
+export interface StoryEngineDraftResult {
+  storyEngine: StoryEngineInput;
+  baseRevision: string;
+}
+export interface CharacterCraftDraftCharacter {
+  name: string;
+  importance: number;
+  asOfChapter: number | null;
+  currentDesire: string;
+  fear: string;
+  secret: string;
+  pressureResponse: string;
+  speechPattern: string;
+  speechAvoid: string;
+  notes: string;
+}
+export interface CharacterCraftDraftRelationship {
+  from: string;
+  to: string;
+  importance: number;
+  asOfChapter: number | null;
+  temperature: number;
+  surfaceState: string;
+  privateTension: string;
+  desiredDirection: string;
+  notes: string;
+}
+export interface CharacterCraftDraftResult {
+  characters: CharacterCraftDraftCharacter[];
+  relationships: CharacterCraftDraftRelationship[];
+  baseRevision: string;
+}
+export interface PromiseLedgerDraftEntry {
+  kind: PromiseKind;
+  importance: number;
+  promise: string;
+  expectedStartChapter: number;
+  expectedEndChapter: number;
+  notes: string;
+}
+export interface PromiseLedgerDraftResult {
+  entries: PromiseLedgerDraftEntry[];
+  baseRevision: string;
+}
 export type PromiseNarrativeBeat = 'plant' | 'pressure' | 'misdirect'
   | 'reinterpret' | 'collide' | 'payoff';
 export type PromiseWorldLink = 'none' | 'deepen-current' | 'support-gate';
@@ -445,6 +489,33 @@ export interface Config {
   baseUrl: string; model: string; apiKey: string;
   chapterWordTarget: number; requestTimeoutMs: number;
   modelContextChars: number; revision: string;
+}
+export interface LlmUsageTotals {
+  calls: number; succeeded: number; failed: number; cancelled: number;
+  inputChars: number; outputChars: number;
+  estimatedInputTokens: number; estimatedOutputTokens: number;
+  providerInputTokens: number; providerOutputTokens: number; providerUsageCalls: number;
+  billingInputTokens: number; billingOutputTokens: number;
+  durationMs: number;
+}
+export interface LlmUsageEntry {
+  at: string; task: string; provider: string; model: string;
+  status: 'success' | 'failed' | 'cancelled'; errorCode: string;
+  inputChars: number; outputChars: number;
+  estimatedInputTokens: number; estimatedOutputTokens: number;
+  providerInputTokens: number | null; providerOutputTokens: number | null;
+  billingInputTokens: number; billingOutputTokens: number;
+  durationMs: number;
+}
+export interface LlmUsageModel extends LlmUsageTotals {
+  key: string; provider: string; model: string;
+}
+export interface LlmUsageSnapshot {
+  startedAt: string;
+  totals: LlmUsageTotals;
+  models: LlmUsageModel[];
+  recent: LlmUsageEntry[];
+  note: string;
 }
 export interface ApiProfile {
   id: string;

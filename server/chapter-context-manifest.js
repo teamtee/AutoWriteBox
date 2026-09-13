@@ -30,7 +30,12 @@ import {
 } from './chapter-prose-metrics.js';
 import {
   buildChapterContextBudget, chapterContextRequests, CHAPTER_CONTEXT_LAYERS,
+  fitChapterContextBudget,
 } from './context-budget.js';
+import { MAX_LLM_INPUT_CHARS } from './limits.js';
+import {
+  buildChapterInstruction, buildContext, buildSystemPrompt,
+} from './prompts.js';
 
 const OMISSION_PATTERN = /(?:因上下文预算省略|中间内容已省略|较早[^\n]{0,30}已省略|已省略中间|较低优先级[^\n]{0,30}未发送|不相关[^\n]{0,30}未发送)/u;
 
@@ -116,7 +121,43 @@ export function buildChapterContextManifest({
     writingAssetContext: text(writingAssetContext?.text),
   };
   const budgetRequests = chapterContextRequests(budgetInput);
-  const budgetResult = buildChapterContextBudget(budgetInput, { modelContextChars });
+  const assemblePrompt = (budget) => {
+    const system = buildSystemPrompt(
+      book?.settings?.core, text(writingAssetContext?.text),
+      book?.settings?.storyEngine, budget.allocation,
+    );
+    const context = buildContext({
+      book, section, prevChapter: previousChapter, bookChapterIndex,
+      chapterPlan: plan, currentContent: currentBody,
+      budget: budget.allocation, budgetTrimmed: budget.trimmed,
+    });
+    const instruction = `${context}\n\n${buildChapterInstruction({
+      chapterIndex: chapter?.index ?? bookChapterIndex,
+      bookChapterIndex, wordTarget: 3_000, mode: 'rewrite',
+      currentContent: currentBody, recentReviewSignals,
+      chapterPlan: plan, budget: budget.allocation,
+      requireFullCurrentContent: Boolean(currentBody),
+    })}`;
+    return { system, messages: [{ role: 'user', content: instruction }] };
+  };
+  let promptDoesNotFit = false;
+  let assembledTotalChars = null;
+  let budgetResult;
+  try {
+    const fitted = fitChapterContextBudget(budgetInput, {
+      modelContextChars, assemble: assemblePrompt,
+    });
+    budgetResult = fitted.budget;
+    assembledTotalChars = fitted.totalChars;
+  } catch (error) {
+    if (error?.message !== 'LLM_INPUT_TOO_LARGE') throw error;
+    promptDoesNotFit = true;
+    budgetResult = buildChapterContextBudget(budgetInput, {
+      modelContextChars,
+      fixedOverheadChars: Number.isSafeInteger(modelContextChars)
+        ? modelContextChars : MAX_LLM_INPUT_CHARS,
+    });
+  }
   const budgetTrimmedIds = new Set(budgetResult.trimmed.map((entry) => entry.id));
   const budgetLayers = CHAPTER_CONTEXT_LAYERS.map((entry) => ({
     id: entry.id, label: entry.label,
@@ -284,6 +325,12 @@ export function buildChapterContextManifest({
     ]),
   ];
   const warnings = [];
+  if (promptDoesNotFit) {
+    warnings.push(warning(
+      'model-context-too-small', 'risk',
+      '当前任务的固定指令或必须完整携带的正文已经超过所选模型窗口；系统会在调用前停止。请改用更大窗口模型或缩短超长正文。',
+    ));
+  }
   if (!coreFields.world) {
     warnings.push(warning('missing-world-rules', 'risk', '缺少世界规则，模型无法稳定约束能力、制度、地点与宏观冲突。'));
   } else if (!worldDiagnostics.valid) {
@@ -455,7 +502,8 @@ export function buildChapterContextManifest({
       ceiling: budgetResult.ceiling,
       fixedOverheadCharacters: budgetResult.fixedOverheadChars,
       assignableCharacters: budgetResult.total,
-      remainingCharacters: budgetResult.remaining,
+      remainingCharacters: assembledTotalChars === null
+        ? 0 : Math.max(0, budgetResult.ceiling - assembledTotalChars),
       layers: budgetLayers,
     },
     prose: {
